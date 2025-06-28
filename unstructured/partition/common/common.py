@@ -370,17 +370,38 @@ def convert_to_bytes(file: bytes | IO[bytes]) -> bytes:
     if isinstance(file, bytes):
         return file
 
-    if isinstance(file, SpooledTemporaryFile):
-        file.seek(0)
-        f_bytes = file.read()
-        file.seek(0)
-        return f_bytes
-
     if isinstance(file, BytesIO):
+        # Fast path for in-memory bytes buffer
         return file.getvalue()
 
-    if isinstance(file, (TextIOWrapper, BufferedReader)):
-        with open(file.name, "rb") as f:
+    if isinstance(file, SpooledTemporaryFile):
+        # We must preserve the file's position for later reads.
+        pos = file.tell()
+        try:
+            file.seek(0)
+            data = file.read()
+        finally:
+            file.seek(pos)
+        return data
+
+    if isinstance(file, BufferedReader):
+        # BufferedReader could be wrapped around a file or pipe.
+        # Use its read and reset position.
+        pos = file.tell()
+        try:
+            file.seek(0)
+            data = file.read()
+        finally:
+            file.seek(pos)
+        return data
+
+    if isinstance(file, TextIOWrapper):
+        # TextIOWrapper does not expose bytes, but likely has .name
+        try:
+            name = file.name
+        except AttributeError:
+            raise ValueError("TextIOWrapper without .name attribute cannot be handled")
+        with open(name, "rb") as f:
             return f.read()
 
     raise ValueError("Invalid file-like object type")

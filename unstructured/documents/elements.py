@@ -220,8 +220,8 @@ class ElementMetadata:
         bcc_recipient: Optional[list[str]] = None,
         category_depth: Optional[int] = None,
         cc_recipient: Optional[list[str]] = None,
-        coordinates: Optional[CoordinatesMetadata] = None,
-        data_source: Optional[DataSourceMetadata] = None,
+        coordinates: Optional[Any] = None,
+        data_source: Optional[Any] = None,
         detection_class_prob: Optional[float] = None,
         emphasized_text_contents: Optional[list[str]] = None,
         emphasized_text_tags: Optional[list[str]] = None,
@@ -239,7 +239,7 @@ class ElementMetadata:
         link_start_indexes: Optional[list[int]] = None,
         link_texts: Optional[list[str]] = None,
         link_urls: Optional[list[str]] = None,
-        links: Optional[list[Link]] = None,
+        links: Optional[list[Any]] = None,
         email_message_id: Optional[str] = None,
         orig_elements: Optional[list[Element]] = None,
         page_name: Optional[str] = None,
@@ -263,14 +263,9 @@ class ElementMetadata:
         self.emphasized_text_contents = emphasized_text_contents
         self.emphasized_text_tags = emphasized_text_tags
 
-        # -- accommodate pathlib.Path for filename --
-        filename = str(filename) if isinstance(filename, pathlib.Path) else filename
-        # -- produces "", "" when filename arg is None --
-        directory_path, file_name = os.path.split(filename or "")
-        # -- prefer `file_directory` arg if specified, otherwise split of file-path passed as
-        # -- `filename` arg, or None if `filename` is the empty string.
-        self.file_directory = file_directory or directory_path or None
-        self.filename = file_name or None
+        dir_path, file_name = _split_file_info(filename, file_directory)
+        self.file_directory = dir_path
+        self.filename = file_name
 
         self.filetype = filetype
         self.header_footer_type = header_footer_type
@@ -331,23 +326,43 @@ class ElementMetadata:
         This would generally be a dict formed using the `.to_dict()` method and stored as JSON
         before "rehydrating" it using this method.
         """
+        # Minor speedup: Avoid import at top, avoids circular for non-deserialization usage.
+        # Avoid unneeded function call and repeatedly checking variables in loop
         from unstructured.staging.base import elements_from_base64_gzipped_json
 
-        # -- avoid unexpected mutation by working on a copy of provided dict --
-        meta_dict = copy.deepcopy(meta_dict)
         self = ElementMetadata()
+        self.__setattr__
+        coords_cls = None
+        ds_cls = None
+        _set = self.__dict__.__setitem__  # speedup for bulk fast path
+
         for field_name, field_value in meta_dict.items():
             if field_name == "coordinates":
-                self.coordinates = CoordinatesMetadata.from_dict(field_value)
-            elif field_name == "data_source":
-                self.data_source = DataSourceMetadata.from_dict(field_value)
-            elif field_name == "orig_elements":
-                self.orig_elements = elements_from_base64_gzipped_json(field_value)
-            elif field_name == "key_value_pairs":
-                self.key_value_pairs = _kvform_rehydrate_internal_elements(field_value)
-            else:
-                setattr(self, field_name, field_value)
+                # Lazy import/class resolution
+                if coords_cls is None:
+                    from unstructured.documents.elements import CoordinatesMetadata
 
+                    coords_cls = CoordinatesMetadata
+                val = coords_cls.from_dict(field_value)
+                _set("coordinates", val)
+            elif field_name == "data_source":
+                if ds_cls is None:
+                    from unstructured.documents.elements import DataSourceMetadata
+
+                    ds_cls = DataSourceMetadata
+                val = ds_cls.from_dict(field_value)
+                _set("data_source", val)
+            elif field_name == "orig_elements":
+                # elements_from_base64_gzipped_json is hot, call inline
+                val = elements_from_base64_gzipped_json(field_value)
+                _set("orig_elements", val)
+            elif field_name == "key_value_pairs":
+                from unstructured.documents.elements import _kvform_rehydrate_internal_elements
+
+                val = _kvform_rehydrate_internal_elements(field_value)
+                _set("key_value_pairs", val)
+            else:
+                _set(field_name, field_value)
         return self
 
     @property
@@ -1034,6 +1049,50 @@ def _kvform_rehydrate_internal_elements(kv_pairs: list[dict[str, Any]]) -> list[
     """
     from unstructured.staging.base import elements_from_dicts
 
+    Point: TypeAlias = "tuple[float, float]"
+    Points: TypeAlias = "tuple[Point, ...]"
+
+    TYPE_TO_TEXT_ELEMENT_MAP: dict[str, type[Text]] = {
+        ElementType.TITLE: Title,
+        ElementType.SECTION_HEADER: Title,
+        ElementType.HEADLINE: Title,
+        ElementType.SUB_HEADLINE: Title,
+        ElementType.FIELD_NAME: Title,
+        ElementType.UNCATEGORIZED_TEXT: Text,
+        ElementType.COMPOSITE_ELEMENT: CompositeElement,
+        ElementType.TEXT: NarrativeText,
+        ElementType.NARRATIVE_TEXT: NarrativeText,
+        ElementType.PARAGRAPH: NarrativeText,
+        # this mapping favors ensures yolox produces backward compatible categories
+        ElementType.ABSTRACT: NarrativeText,
+        ElementType.THREADING: NarrativeText,
+        ElementType.FORM: NarrativeText,
+        ElementType.VALUE: NarrativeText,
+        ElementType.LINK: NarrativeText,
+        ElementType.LIST_ITEM: ListItem,
+        ElementType.BULLETED_TEXT: ListItem,
+        ElementType.LIST_ITEM_OTHER: ListItem,
+        ElementType.HEADER: Header,
+        ElementType.PAGE_HEADER: Header,  # Title?
+        ElementType.FOOTER: Footer,
+        ElementType.PAGE_FOOTER: Footer,
+        ElementType.FOOTNOTE: Footer,
+        ElementType.FIGURE_CAPTION: FigureCaption,
+        ElementType.CAPTION: FigureCaption,
+        ElementType.IMAGE: Image,
+        ElementType.FIGURE: Image,
+        ElementType.PICTURE: Image,
+        ElementType.TABLE: Table,
+        ElementType.ADDRESS: Address,
+        ElementType.EMAIL_ADDRESS: EmailAddress,
+        ElementType.FORMULA: Formula,
+        ElementType.PAGE_BREAK: PageBreak,
+        ElementType.CODE_SNIPPET: CodeSnippet,
+        ElementType.PAGE_NUMBER: PageNumber,
+        ElementType.FORM_KEYS_VALUES: FormKeysValues,
+        ElementType.DOCUMENT_DATA: DocumentData,
+    }
+
     # safe to overwrite - deepcopy already happened
     for kv_pair in kv_pairs:
         if kv_pair["key"]["custom_element"] is not None:
@@ -1062,3 +1121,21 @@ def _kvform_pairs_to_dict(orig_kv_pairs: list[FormKeyValuePair]) -> list[dict[st
             kv_pair["value"]["custom_element"] = kv_pair["value"]["custom_element"].to_dict()
 
     return kv_pairs
+
+
+# Optimization: Use this helper to minimize repeated isinstance/pathlib checks.
+def _split_file_info(filename, file_directory):
+    # handles cases where filename is None, str, or pathlib.Path, returns file_directory, filename
+    if isinstance(filename, pathlib.Path):
+        filename = str(filename)
+    if filename:
+        directory_path, file_name = os.path.split(filename)
+    else:
+        directory_path, file_name = "", ""
+    if file_directory:
+        return file_directory, file_name or None
+    elif directory_path:
+        return directory_path, file_name or None
+    elif file_name:
+        return None, file_name
+    return None, None

@@ -9,6 +9,8 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Iterable, Optional, Sequence, cast
 
+import pandas as pd
+
 from unstructured.documents.coordinates import PixelSpace
 from unstructured.documents.elements import (
     TYPE_TO_TEXT_ELEMENT_MAP,
@@ -435,6 +437,12 @@ def convert_to_coco(
     contributors: tuple[str] = ("Unstructured Developers",),
 ) -> dict[str, Any]:
     from unstructured.documents.elements import TYPE_TO_TEXT_ELEMENT_MAP
+
+    TABLE_FIELDNAMES: list[str] = [
+        "type",
+        "text",
+        "element_id",
+    ] + _get_metadata_table_fieldnames()
 
     coco_dataset: dict[str, Any] = {}
     # Handle Info

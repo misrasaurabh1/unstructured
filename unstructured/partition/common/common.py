@@ -167,53 +167,48 @@ def add_element_metadata(
     Document metadata includes information like the filename, source url, and page number.
     """
 
-    coordinates_metadata = (
-        CoordinatesMetadata(
+    # Avoid unnecessary construction: Only create CoordinatesMetadata if both parts provided.
+    if coordinates is not None and coordinate_system is not None:
+        coordinates_metadata = CoordinatesMetadata(
             points=coordinates,
             system=coordinate_system,
         )
-        if coordinates is not None and coordinate_system is not None
-        else None
-    )
-    links = element.links if hasattr(element, "links") and len(element.links) > 0 else None
-    link_urls = [link.get("url") for link in links] if links else None
-    link_texts = [link.get("text") for link in links] if links else None
-    link_start_indexes = [link.get("start_index") for link in links] if links else None
-    emphasized_texts = (
-        element.emphasized_texts
-        if hasattr(element, "emphasized_texts") and len(element.emphasized_texts) > 0
-        else None
-    )
-    emphasized_text_contents = (
-        [emphasized_text.get("text") for emphasized_text in emphasized_texts]
-        if emphasized_texts
-        else None
-    )
-    emphasized_text_tags = (
-        [emphasized_text.get("tag") for emphasized_text in emphasized_texts]
-        if emphasized_texts
-        else None
-    )
-    depth = element.metadata.category_depth if element.metadata.category_depth else None
+    else:
+        coordinates_metadata = None
 
-    metadata = ElementMetadata(
-        coordinates=coordinates_metadata,
-        filename=filename,
-        filetype=filetype,
-        page_number=page_number,
-        url=url,
-        text_as_html=text_as_html,
-        link_urls=link_urls,
-        link_texts=link_texts,
-        link_start_indexes=link_start_indexes,
-        emphasized_text_contents=emphasized_text_contents,
-        emphasized_text_tags=emphasized_text_tags,
-        category_depth=depth,
-        image_path=image_path,
-        languages=languages,
-    )
-    element.metadata.update(metadata)
+    link_urls, link_texts, link_start_indexes = _extract_links(element)
+    emphasized_text_contents, emphasized_text_tags = _extract_emphasized(element)
+
+    # Only retrieve category_depth once
+    cat_meta = getattr(element, "metadata", None)
+    depth = getattr(cat_meta, "category_depth", None) if cat_meta else None
+
+    # Only update the fields actually provided, don't reconstruct a full ElementMetadata!
+    update_fields = {
+        "coordinates": coordinates_metadata,
+        "filename": filename,
+        "filetype": filetype,
+        "page_number": page_number,
+        "url": url,
+        "text_as_html": text_as_html,
+        "link_urls": link_urls,
+        "link_texts": link_texts,
+        "link_start_indexes": link_start_indexes,
+        "emphasized_text_contents": emphasized_text_contents,
+        "emphasized_text_tags": emphasized_text_tags,
+        "category_depth": depth,
+        "image_path": image_path,
+        "languages": languages,
+    }
+
+    # Remove keys with value None to avoid unsetting metadata fields unnecessarily.
+    # This reduces .update() workload and potential __setattr__ calls.
+    clean_update_fields = {k: v for k, v in update_fields.items() if v is not None}
+    # Avoid new ElementMetadata object: update straight using the dict
+    for k, v in clean_update_fields.items():
+        setattr(element.metadata, k, v)
     if detection_origin is not None:
+        # Set detection_origin if present. (not in dict-update as per behavior)
         element.metadata.detection_origin = detection_origin
     return element
 
@@ -452,3 +447,35 @@ def ocr_data_to_elements(
         elements.append(element)
 
     return elements
+
+
+def _extract_links(element):
+    # Helper function to minimize repeated list/dict creaton
+    try:
+        links = element.links
+        if not links or len(links) == 0:
+            return None, None, None
+    except AttributeError:
+        return None, None, None
+    # Create all three lists in one pass
+    link_urls, link_texts, link_start_indexes = [], [], []
+    for link in links:
+        # Use .get() in case link is a dict
+        link_urls.append(link.get("url"))
+        link_texts.append(link.get("text"))
+        link_start_indexes.append(link.get("start_index"))
+    return link_urls, link_texts, link_start_indexes
+
+
+def _extract_emphasized(element):
+    try:
+        emphasized_texts = element.emphasized_texts
+        if not emphasized_texts or len(emphasized_texts) == 0:
+            return None, None
+    except AttributeError:
+        return None, None
+    content, tag = [], []
+    for et in emphasized_texts:
+        content.append(et.get("text"))
+        tag.append(et.get("tag"))
+    return content, tag

@@ -239,14 +239,23 @@ def tesseract_to_paddle_language(tesseract_language: str) -> str:
     :return: str, corresponding language code for PaddleOCR or None if not found
     """
 
-    lang = PYTESSERACT_TO_PADDLE_LANG_CODE_MAP.get(tesseract_language.lower())
-    if not lang:
+    # Use cache for repeated requests to avoid repeated mapping and warning
+    cache_key = tesseract_language.lower()
+    if cache_key in _language_cache:
+        return _language_cache[cache_key]
+
+    # Do the mapping
+    lang = PYTESSERACT_TO_PADDLE_LANG_CODE_MAP.get(cache_key)
+    if lang is None:
+        # Only log once for unseen 'not found' language
         logger.warning(
             f"{tesseract_language} is not a language code supported by PaddleOCR, "
             f"proceeding with `en` instead."
         )
+        _language_cache[cache_key] = "en"
         return "en"
 
+    _language_cache[cache_key] = lang
     return lang
 
 
@@ -518,3 +527,6 @@ def _clean_ocr_languages_arg(ocr_languages: list[str] | str) -> str:
     ocr_languages = re.sub(r"[\[\]]", "", ocr_languages)
 
     return ocr_languages
+
+
+_language_cache = {}

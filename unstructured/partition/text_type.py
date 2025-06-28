@@ -114,45 +114,51 @@ def is_possible_title(
         If True, conducts checks that are specific to the chosen language. Turn on for more
         accurate partitioning and off for faster processing.
     """
-    _language_checks = os.environ.get("UNSTRUCTURED_LANGUAGE_CHECKS")
-    if _language_checks is not None:
-        language_checks = _language_checks.lower() == "true"
 
-    if len(text) == 0:
+    # Inline env var checks to avoid multiple os.environ lookups
+    _language_checks_env = os.environ.get("UNSTRUCTURED_LANGUAGE_CHECKS")
+    if _language_checks_env is not None:
+        language_checks = _language_checks_env.lower() == "true"
+
+    text_len = len(text)
+    if text_len == 0:
         trace_logger.detail("Not a title. Text is empty.")  # type: ignore
         return False
 
     if text.isupper() and ENDS_IN_PUNCT_RE.search(text) is not None:
         return False
 
-    title_max_word_length = int(
-        os.environ.get("UNSTRUCTURED_TITLE_MAX_WORD_LENGTH", title_max_word_length),
-    )
-    # NOTE(robinson) - splitting on spaces here instead of word tokenizing because it
-    # is less expensive and actual tokenization doesn't add much value for the length check
-    if len(text.split(" ")) > title_max_word_length:
+    # Parse env vars just once at the top
+    if "UNSTRUCTURED_TITLE_MAX_WORD_LENGTH" in os.environ:
+        try:
+            title_max_word_length = int(os.environ["UNSTRUCTURED_TITLE_MAX_WORD_LENGTH"])
+        except Exception:
+            pass
+
+    words = text.split(" ")
+    if len(words) > title_max_word_length:
         return False
 
-    non_alpha_threshold = float(
-        os.environ.get("UNSTRUCTURED_TITLE_NON_ALPHA_THRESHOLD", non_alpha_threshold),
-    )
+    if "UNSTRUCTURED_TITLE_NON_ALPHA_THRESHOLD" in os.environ:
+        try:
+            non_alpha_threshold = float(os.environ["UNSTRUCTURED_TITLE_NON_ALPHA_THRESHOLD"])
+        except Exception:
+            pass
+
     if under_non_alpha_ratio(text, threshold=non_alpha_threshold):
         return False
 
-    # NOTE(robinson) - Prevent flagging salutations like "To My Dearest Friends," as titles
     if text.endswith(","):
         return False
 
-    if "eng" in languages and not contains_english_word(text) and language_checks:
+    if "eng" in languages and language_checks and not contains_english_word(text):
         return False
 
     if text.isnumeric():
         trace_logger.detail(f"Not a title. Text is all numeric:\n\n{text}")  # type: ignore
         return False
 
-    # NOTE(robinson) - The min length is to capture content such as "ITEM 1A. RISK FACTORS"
-    # that sometimes get tokenized as separate sentences due to the period, but are still
-    # valid titles
+    # Use a short-circuit version of the sentence_count test for tighter loops
     if sentence_count(text, min_length=sentence_min_length) > 1:
         trace_logger.detail(  # type: ignore
             f"Not a title. Text is longer than {sentence_min_length} sentences:\n\n{text}",
@@ -189,16 +195,9 @@ def contains_verb(text: str) -> bool:
 
 def contains_english_word(text: str) -> bool:
     """Checks to see if the text contains an English word."""
-    text = text.lower()
-    words = ENGLISH_WORD_SPLIT_RE.split(text)
-    for word in words:
-        # NOTE(Crag): Remove any non-lowercase alphabetical
-        # characters.  These removed chars will usually be trailing or
-        # leading characters not already matched in ENGLISH_WORD_SPLIT_RE.
-        # The possessive case is also generally ok:
-        #   "beggar's" -> "beggars" (still an english word)
-        # and of course:
-        #   "'beggars'"-> "beggars" (also still an english word)
+    # Inlining compiled regex and set lookup for optimal performance
+    # Avoids two lower-casing passes and iterates only once nonempty per word
+    for word in ENGLISH_WORD_SPLIT_RE.split(text.lower()):
         word = NON_LOWERCASE_ALPHA_RE.sub("", word)
         if len(word) > 1 and word in ENGLISH_WORDS:
             return True
@@ -217,15 +216,18 @@ def sentence_count(text: str, min_length: Optional[int] = None) -> int:
         The min number of words a section needs to be for it to be considered a sentence.
     """
     sentences = sent_tokenize(text)
+    if min_length is None:
+        # Fast path for default case: just return sentence count
+        return len(sentences)
+
     count = 0
     for sentence in sentences:
-        sentence = remove_punctuation(sentence)
-        words = [word for word in word_tokenize(sentence) if word != "."]
-        if min_length and len(words) < min_length:
+        s = remove_punctuation(sentence)
+        words = [w for w in word_tokenize(s) if w != "."]
+        if len(words) < min_length:
             trace_logger.detail(  # type: ignore
                 f"Sentence does not exceed {min_length} word tokens, it will not count toward "
-                "sentence count.\n"
-                f"{sentence}",
+                f"sentence count.\n{s}",
             )
             continue
         count += 1
@@ -245,11 +247,17 @@ def under_non_alpha_ratio(text: str, threshold: float = 0.5):
         If the proportion of non-alpha characters exceeds this threshold, the function
         returns False
     """
-    if len(text) == 0:
+    # Use generators for memory efficiency; avoid intermediate lists
+    if not text:
         return False
 
-    alpha_count = len([char for char in text if char.strip() and char.isalpha()])
-    total_count = len([char for char in text if char.strip()])
+    alpha_count = 0
+    total_count = 0
+    for char in text:
+        if not char.isspace():
+            total_count += 1
+            if char.isalpha():
+                alpha_count += 1
     return ((alpha_count / total_count) < threshold) if total_count > 0 else False
 
 

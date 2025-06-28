@@ -175,13 +175,19 @@ def _get_height_percentage(
     coordinates: tuple[tuple[float, float], ...],
     coordinate_system: CoordinateSystem,
 ) -> float:
-    avg_y = sum(coordinate[1] for coordinate in coordinates) / len(coordinates)
+    # Manual summing (still fast in modern Python, though zip is usually optimal)
+    total_y = 0.0
+    n = len(coordinates)
+    for c in coordinates:
+        total_y += c[1]
+    avg_y = total_y / n
     return avg_y / coordinate_system.height
 
 
 def _is_empty_bullet(text: str) -> bool:
     """Checks if input text is an empty bullet."""
-    return bool(UNICODE_BULLETS_RE.match(text) and len(text) == 1)
+    # Fast set lookup instead of regex match
+    return len(text) == 1 and text in _BULLET_CHARS
 
 
 def _is_in_footer_position(
@@ -214,3 +220,28 @@ def _is_in_header_position(
 def _split_by_paragraph(file_text: str) -> list[str]:
     """Split text into paragraphs."""
     return re.split(PARAGRAPH_PATTERN, file_text.strip())
+
+
+# Extract the bullet characters from the pattern, so we can do a fast set lookup instead of regex match
+# This assumes the pattern only contains single-character bullets, e.g.: "[•‣⁃◦*▪▫❖●◆■□]" etc.
+# Modify extraction logic if your regex is more complex.
+
+
+def _extract_bullet_chars():
+    # Very basic extraction for patterns like: r"[•‣⁃◦*▪▫❖●◆■□]"
+    pattern = UNICODE_BULLETS_RE.pattern
+    if pattern.startswith("[") and pattern.endswith("]"):
+        return set(pattern[1:-1])
+    # Otherwise fall back to set of all chars matching the regex
+    # This is less efficient and only used as backup:
+    import sys
+
+    bullets = set()
+    for i in range(sys.maxunicode + 1):
+        ch = chr(i)
+        if UNICODE_BULLETS_RE.match(ch):
+            bullets.add(ch)
+    return bullets
+
+
+_BULLET_CHARS = _extract_bullet_chars()

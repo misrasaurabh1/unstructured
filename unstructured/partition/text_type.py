@@ -164,7 +164,8 @@ def is_possible_title(
 
 def is_bulleted_text(text: str) -> bool:
     """Checks to see if the section of text is part of a bulleted list."""
-    return UNICODE_BULLETS_RE.match(text.strip()) is not None
+    # Use a regex that allows leading whitespace to avoid expensive .strip()
+    return _BULLETS_WITH_WS_RE.match(text) is not None
 
 
 def contains_us_phone_number(text: str) -> bool:
@@ -311,3 +312,15 @@ def is_email_address(text: str) -> bool:
 def is_possible_numbered_list(text: str) -> bool:
     """Checks to see if the text is a potential numbered list."""
     return NUMBERED_LIST_RE.match(text.strip()) is not None
+
+
+def _bullets_re_with_leading_ws():
+    # This helper returns a regex like r"^\s*<bullets_re_without^>..."
+    # Preserves the current UNICODE_BULLETS_RE pattern after the start anchor
+    pattern = UNICODE_BULLETS_RE.pattern
+    if pattern.startswith("^"):
+        pattern = pattern[1:]
+    return re.compile(r"^\s*" + pattern, UNICODE_BULLETS_RE.flags)
+
+
+_BULLETS_WITH_WS_RE = _bullets_re_with_leading_ws()

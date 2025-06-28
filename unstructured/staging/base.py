@@ -4,6 +4,8 @@ import base64
 import csv
 import io
 import json
+import os
+import pathlib
 import zlib
 from copy import deepcopy
 from datetime import datetime
@@ -54,23 +56,27 @@ def elements_from_base64_gzipped_json(b64_encoded_elements: str) -> list[Element
 def elements_from_dicts(element_dicts: Iterable[dict[str, Any]]) -> list[Element]:
     """Convert a list of element-dicts to a list of elements."""
     elements: list[Element] = []
+    # Use local vars to reduce repeated lookups
+    t2textmap = TYPE_TO_TEXT_ELEMENT_MAP
+    ElementMd = ElementMetadata
+    append = elements.append
+    CheckBoxCls = CheckBox
 
+    # Hot path: exit quickly when no items
     for item in element_dicts:
-        element_id: str = item.get("element_id", None)
-        metadata = (
-            ElementMetadata()
-            if item.get("metadata") is None
-            else ElementMetadata.from_dict(item["metadata"])
-        )
+        element_id = item.get("element_id", None)
+        metadata_dict = item.get("metadata")
+        if metadata_dict is None:
+            metadata = ElementMd()
+        else:
+            metadata = ElementMd.from_dict(metadata_dict)
 
-        if item.get("type") in TYPE_TO_TEXT_ELEMENT_MAP:
-            ElementCls = TYPE_TO_TEXT_ELEMENT_MAP[item["type"]]
-            elements.append(ElementCls(text=item["text"], element_id=element_id, metadata=metadata))
-        elif item.get("type") == "CheckBox":
-            elements.append(
-                CheckBox(checked=item["checked"], element_id=element_id, metadata=metadata)
-            )
-
+        typ = item.get("type")
+        if typ in t2textmap:
+            ElementCls = t2textmap[typ]
+            append(ElementCls(text=item["text"], element_id=element_id, metadata=metadata))
+        elif typ == "CheckBox":
+            append(CheckBoxCls(checked=item["checked"], element_id=element_id, metadata=metadata))
     return elements
 
 
@@ -525,3 +531,21 @@ def convert_to_coco(
     ]
     coco_dataset["annotations"] = annotations
     return coco_dataset
+
+
+# Optimization: Use this helper to minimize repeated isinstance/pathlib checks.
+def _split_file_info(filename, file_directory):
+    # handles cases where filename is None, str, or pathlib.Path, returns file_directory, filename
+    if isinstance(filename, pathlib.Path):
+        filename = str(filename)
+    if filename:
+        directory_path, file_name = os.path.split(filename)
+    else:
+        directory_path, file_name = "", ""
+    if file_directory:
+        return file_directory, file_name or None
+    elif directory_path:
+        return directory_path, file_name or None
+    elif file_name:
+        return None, file_name
+    return None, None

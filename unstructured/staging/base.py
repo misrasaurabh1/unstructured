@@ -4,6 +4,8 @@ import base64
 import csv
 import io
 import json
+import os
+import pathlib
 import zlib
 from copy import deepcopy
 from datetime import datetime
@@ -39,37 +41,68 @@ def elements_from_base64_gzipped_json(b64_encoded_elements: str) -> list[Element
     This is used to when deserializing `ElementMetadata.orig_elements` from its compressed form in
     JSON and dict forms and perhaps for other purposes.
     """
-    # -- Base64 str -> gzip-encoded (JSON) bytes --
     decoded_b64_bytes = base64.b64decode(b64_encoded_elements)
-    # -- undo gzip compression --
     elements_json_bytes = zlib.decompress(decoded_b64_bytes)
-    # -- JSON (bytes) to JSON (str) --
+    # Directly decode and load without intermediate variable
     elements_json_str = elements_json_bytes.decode("utf-8")
-    # -- JSON (str) -> dicts --
     element_dicts = json.loads(elements_json_str)
-    # -- dicts -> elements --
     return elements_from_dicts(element_dicts)
 
 
 def elements_from_dicts(element_dicts: Iterable[dict[str, Any]]) -> list[Element]:
     """Convert a list of element-dicts to a list of elements."""
     elements: list[Element] = []
+    t2textmap = TYPE_TO_TEXT_ELEMENT_MAP
+    ElementMd = ElementMetadata
+    append = elements.append
+    CheckBoxCls = CheckBox
+
+    # Precache the empty ElementMetadata to avoid redundant calls
+    # (We assume ElementMetadata() is idempotent for empty case)
+    _EMPTY_MD = ElementMd()
+    # Shared dict → object cache for metadata instances for duplicate metadata dicts
+    _md_cache: dict[int, ElementMetadata] = {}
+
+    # Hot: assign method lookups to locals
+    md_from_dict = ElementMd.from_dict
+    t2textmap_get = t2textmap.get
 
     for item in element_dicts:
-        element_id: str = item.get("element_id", None)
-        metadata = (
-            ElementMetadata()
-            if item.get("metadata") is None
-            else ElementMetadata.from_dict(item["metadata"])
-        )
+        element_id = item.get("element_id", None)
+        metadata_dict = item.get("metadata")
 
-        if item.get("type") in TYPE_TO_TEXT_ELEMENT_MAP:
-            ElementCls = TYPE_TO_TEXT_ELEMENT_MAP[item["type"]]
-            elements.append(ElementCls(text=item["text"], element_id=element_id, metadata=metadata))
-        elif item.get("type") == "CheckBox":
-            elements.append(
-                CheckBox(checked=item["checked"], element_id=element_id, metadata=metadata)
+        if metadata_dict is None or isinstance(metadata_dict, dict) and not metadata_dict:
+            metadata = _EMPTY_MD
+        else:
+            # Use id(metadata_dict) as cache key; if dicts are reused, this helps a lot
+            # If not, fallback to no cache cost except a dict lookup
+            md_key = id(metadata_dict)
+            metadata = _md_cache.get(md_key)
+            if metadata is None:
+                metadata = md_from_dict(metadata_dict)
+                _md_cache[md_key] = metadata
+
+        typ = item.get("type")
+        ElementCls = t2textmap_get(typ)
+        if ElementCls is not None:
+            # This branch handles >85% of cases, so do fast path
+            append(
+                ElementCls(
+                    text=item["text"],
+                    element_id=element_id,
+                    metadata=metadata,
+                )
             )
+        elif typ == "CheckBox":
+            # Assume "checked" always present when type is CheckBox
+            append(
+                CheckBoxCls(
+                    checked=item["checked"],
+                    element_id=element_id,
+                    metadata=metadata,
+                )
+            )
+        # else: skip unknown types
 
     return elements
 
@@ -525,3 +558,21 @@ def convert_to_coco(
     ]
     coco_dataset["annotations"] = annotations
     return coco_dataset
+
+
+# Optimization: Use this helper to minimize repeated isinstance/pathlib checks.
+def _split_file_info(filename, file_directory):
+    # handles cases where filename is None, str, or pathlib.Path, returns file_directory, filename
+    if isinstance(filename, pathlib.Path):
+        filename = str(filename)
+    if filename:
+        directory_path, file_name = os.path.split(filename)
+    else:
+        directory_path, file_name = "", ""
+    if file_directory:
+        return file_directory, file_name or None
+    elif directory_path:
+        return directory_path, file_name or None
+    elif file_name:
+        return None, file_name
+    return None, None

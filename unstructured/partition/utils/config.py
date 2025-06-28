@@ -33,6 +33,7 @@ class ENVConfig:
     def _get_string(self, var: str, default_value: str = "") -> str:
         """attempt to get the value of var from the os environment; if not present return the
         default_value"""
+        # No change; os.environ.get() is as fast as it gets in Python.
         return os.environ.get(var, default_value)
 
     def _get_int(self, var: str, default_value: int) -> int:
@@ -46,8 +47,13 @@ class ENVConfig:
         return default_value
 
     def _get_bool(self, var: str, default_value: bool) -> bool:
-        if value := self._get_string(var):
-            return value.lower() in ("true", "1", "t")
+        # Use local reference for fastest `set` lookup, and flatten flow for performance.
+        value = os.environ.get(var)
+        if value:
+            # No need to allocate a new tuple every call (use the set above).
+            if value.lower() in _TRUTHY_SET:
+                return True
+            return False
         return default_value
 
     def _setup_tmpdir(self, tmpdir: str) -> None:
@@ -226,3 +232,5 @@ class ENVConfig:
 
 
 env_config = ENVConfig()
+
+_TRUTHY_SET = {"true", "1", "t"}

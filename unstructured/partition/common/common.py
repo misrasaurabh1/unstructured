@@ -126,26 +126,32 @@ def layout_list_to_list_items(
     detection_origin: Optional[str],
 ) -> list[Element]:
     """Converts a list LayoutElement to a list of ListItem elements."""
-    split_items = ENUMERATED_BULLETS_RE.split(text) if text else []
-    # NOTE(robinson) - this means there wasn't a match for the enumerated bullets
+    if not text:
+        return []
+
+    split_items = ENUMERATED_BULLETS_RE.split(text)
     if len(split_items) == 1:
-        split_items = UNICODE_BULLETS_RE.split(text) if text else []
+        split_items = UNICODE_BULLETS_RE.split(text)
 
-    list_items: list[Element] = []
-    for text_segment in split_items:
-        if len(text_segment.strip()) > 0:
-            # Both `coordinates` and `coordinate_system` must be present
-            # in order to add coordinates metadata to the element.
-            item = ListItem(
-                text=text_segment.strip(),
-                coordinates=coordinates,
-                coordinate_system=coordinate_system,
-                metadata=metadata,
-                detection_origin=detection_origin,
-            )
-            list_items.append(item)
+    # Use single-pass list comprehension and call .strip() only once per segment
+    strip_items = [seg.strip() for seg in split_items if seg.strip()]
+    # Localize used things for slight speedup
+    ListItem_ = ListItem
+    coords = coordinates
+    csys = coordinate_system
+    meta = metadata
+    det_origin = detection_origin
 
-    return list_items
+    return [
+        ListItem_(
+            text=segment,
+            coordinates=coords,
+            coordinate_system=csys,
+            metadata=meta,
+            detection_origin=det_origin,
+        )
+        for segment in strip_items
+    ]
 
 
 def add_element_metadata(

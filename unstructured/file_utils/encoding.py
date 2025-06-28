@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import IO, Optional, Tuple, Union
 
 import chardet
@@ -40,12 +42,8 @@ def format_encoding_str(encoding: str) -> str:
         etc).
     """
     formatted_encoding = encoding.lower().replace("_", "-")
-
-    # Special case for Arabic and Hebrew charsets with directional annotations
-    annotated_encodings = ["iso-8859-6-i", "iso-8859-6-e", "iso-8859-8-i", "iso-8859-8-e"]
-    if formatted_encoding in annotated_encodings:
+    if formatted_encoding in _ANNOTATED_ENCODINGS:
         formatted_encoding = formatted_encoding[:-2]  # remove the annotation
-
     return formatted_encoding
 
 
@@ -138,3 +136,6 @@ def read_txt_file(
         raise FileNotFoundError("No filename was specified")
 
     return formatted_encoding, file_text
+
+
+_ANNOTATED_ENCODINGS = {"iso-8859-6-i", "iso-8859-6-e", "iso-8859-8-i", "iso-8859-8-e"}

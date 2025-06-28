@@ -353,8 +353,15 @@ def replace_mime_encodings(text: str, encoding: str = "utf-8") -> str:
     -------
     5 w=E2=80-99s -> 5 w’s
     """
-    formatted_encoding = format_encoding_str(encoding)
-    return quopri.decodestring(text.encode(formatted_encoding)).decode(formatted_encoding)
+    # Fast path for utf-8, the overwhelmingly common case
+    if encoding in ("utf-8", "utf8", "UTF-8", "UTF8"):
+        # Avoid redundant format_encoding_str call
+        # Work with latin1, which is a one-to-one mapping for bytes 0-255 (so .encode/.decode no-op for latin1)
+        return quopri.decodestring(text.encode("latin1")).decode("utf-8")
+    else:
+        formatted_encoding = format_encoding_str(encoding)
+        # latin1 used for the same reason as above: to keep the bytes unchanged before decoding
+        return quopri.decodestring(text.encode("latin1")).decode(formatted_encoding)
 
 
 def clean_prefix(text: str, pattern: str, ignore_case: bool = False, strip: bool = True) -> str:
@@ -469,3 +476,6 @@ def clean_extra_whitespace_with_index_run(text: str) -> Tuple[str, np.ndarray]:
 
 def index_adjustment_after_clean_extra_whitespace(index, moved_indices) -> int:
     return int(index - moved_indices[index])
+
+
+_ANNOTATED_ENCODINGS = {"iso-8859-6-i", "iso-8859-6-e", "iso-8859-8-i", "iso-8859-8-e"}

@@ -15,6 +15,14 @@ from typing import Optional
 
 from unstructured.partition.utils.constants import OCR_AGENT_TESSERACT
 
+"""
+This module contains variables that can permitted to be tweaked by the system environment. For
+example, model parameters that changes the output of an inference call. Constants do NOT belong in
+this module. Constants are values that are usually names for common options (e.g., color names) or
+settings that should not be altered without making a code change (e.g., definition of 1Gb of memory
+in bytes). Constants should go into `./constants.py`
+"""
+
 
 @lru_cache(maxsize=1)
 def get_tempdir(dir: str) -> str:
@@ -46,8 +54,11 @@ class ENVConfig:
         return default_value
 
     def _get_bool(self, var: str, default_value: bool) -> bool:
-        if value := self._get_string(var):
-            return value.lower() in ("true", "1", "t")
+        # Cache env lookup and fast exit if missing
+        val = os.environ.get(var)
+        if val is not None and val:
+            # Use set lookup (faster than tuple for multiple)
+            return val.lower() in {"true", "1", "t"}
         return default_value
 
     def _setup_tmpdir(self, tmpdir: str) -> None:

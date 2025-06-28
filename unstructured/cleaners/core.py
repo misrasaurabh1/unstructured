@@ -368,8 +368,16 @@ def clean_prefix(text: str, pattern: str, ignore_case: bool = False, strip: bool
     ignore_case: If True, ignores case in the pattern
     strip: If True, removes leading whitespace from the cleaned string.
     """
-    flags = re.IGNORECASE if ignore_case else 0
-    clean_text = re.sub(rf"^{pattern}", "", text, flags=flags)
+    # Fast path: plain string prefix, no regex metacharacters
+    if pattern.isalnum() and not ignore_case:
+        if text.startswith(pattern):
+            clean_text = text[len(pattern) :]
+        else:
+            clean_text = text
+    else:
+        flags = re.IGNORECASE if ignore_case else 0
+        regex = re.compile(rf"^{pattern}", flags)
+        clean_text = regex.sub("", text, count=1)
     clean_text = clean_text.lstrip() if strip else clean_text
     return clean_text
 

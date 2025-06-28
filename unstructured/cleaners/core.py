@@ -320,9 +320,11 @@ def clean_extra_whitespace(text: str) -> str:
     -------
     ITEM 1.     BUSINESS -> ITEM 1. BUSINESS
     """
-    cleaned_text = re.sub(r"[\xa0\n]", " ", text)
-    cleaned_text = re.sub(r"([ ]{2,})", " ", cleaned_text)
-    return cleaned_text.strip()
+    # Replace \xa0 and \n with space (much faster than regex for single chars)
+    text = text.replace("\xa0", " ").replace("\n", " ")
+    # Collapse multiple spaces
+    text = _whitespace_re.sub(" ", text)
+    return text.strip()
 
 
 def clean_dashes(text: str) -> str:
@@ -469,3 +471,6 @@ def clean_extra_whitespace_with_index_run(text: str) -> Tuple[str, np.ndarray]:
 
 def index_adjustment_after_clean_extra_whitespace(index, moved_indices) -> int:
     return int(index - moved_indices[index])
+
+
+_whitespace_re = re.compile(r" {2,}")

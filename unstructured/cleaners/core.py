@@ -151,25 +151,53 @@ def group_broken_paragraphs(
     '''The big red fox is walking down the lane.
     At the end of the land the fox met a bear.'''
     """
+
+    # Optimization: Pre-strip once, not multiple times per paragraph
+    # Pre-compile regexps if necessary, assume these objects are pre-compiled as per imports
+
     paragraphs = paragraph_split.split(text)
     clean_paragraphs = []
+
+    # Optimization: cache frequently used local variables and callables
+    paragraph_strip = str.strip
+    line_strip = str.strip
+    str.split
+    space = " "
+    bullet_re_match = UNICODE_BULLETS_RE.match
+    e_bullet_match = E_BULLET_PATTERN.match
+    para_re_sub = re.sub
+    para_pattern = PARAGRAPH_PATTERN
+
+    append = clean_paragraphs.append
+    extend = clean_paragraphs.extend
+
     for paragraph in paragraphs:
-        if not paragraph.strip():
+        p_stripped = paragraph_strip(paragraph)
+        if not p_stripped:
             continue
-        # NOTE(robinson) - This block is to account for lines like the following that shouldn't be
-        # grouped together, but aren't separated by a double line break.
-        #     Apache License
-        #     Version 2.0, January 2004
-        #     http://www.apache.org/licenses/
+
+        # Optimization: only strip once, use the stripped one
+        # Check bullets before unnecessary splitting
+        if bullet_re_match(p_stripped) or e_bullet_match(p_stripped):
+            extend(group_bullet_paragraph(paragraph))
+            continue
+
+        # Use cached split, minimize attribute lookups
         para_split = line_split.split(paragraph)
-        all_lines_short = all(len(line.strip().split(" ")) < 5 for line in para_split)
-        # pytesseract converts some bullet points to standalone "e" characters
-        if UNICODE_BULLETS_RE.match(paragraph.strip()) or E_BULLET_PATTERN.match(paragraph.strip()):
-            clean_paragraphs.extend(group_bullet_paragraph(paragraph))
-        elif all_lines_short:
-            clean_paragraphs.extend([line for line in para_split if line.strip()])
+        # Fast path: bail early if any long lines
+        all_short = True
+        for line in para_split:
+            words = line_strip(line)
+            # Optimization: avoid split for empty/short lines
+            if not words:
+                continue
+            if words.count(" ") >= 4:  # inline, more efficient than split()
+                all_short = False
+                break
+        if all_short:
+            extend([line for line in para_split if line_strip(line)])
         else:
-            clean_paragraphs.append(re.sub(PARAGRAPH_PATTERN, " ", paragraph))
+            append(para_re_sub(para_pattern, space, paragraph))
 
     return "\n\n".join(clean_paragraphs)
 
@@ -205,20 +233,24 @@ def blank_line_grouper(
     paragraph_split: re.Pattern = DOUBLE_PARAGRAPH_PATTERN_RE,
 ) -> str:
     """
-    Concatenates text document that has blank-line paragraph break pattern
+        Concatenates text document that has blank-line paragraph break pattern
 
-    For example,
+        For example,
 
-    Vestibulum auctor dapibus neque.
+        Vestibulum auctor dapibus neque.
+
+        Nunc dignissim risus id metus.
+
+        Will be returned as:
+
+        Vestibulum auctor dapibus neque.
 
     Nunc dignissim risus id metus.
 
-    Will be returned as:
 
-    Vestibulum auctor dapibus neque.\n\nNunc dignissim risus id metus.\n\n
 
     """
-    return group_broken_paragraphs(text)
+    return group_broken_paragraphs(text, paragraph_split=paragraph_split)
 
 
 def auto_paragraph_grouper(

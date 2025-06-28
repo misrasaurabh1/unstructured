@@ -84,8 +84,11 @@ class EmailPartitioningContext:
         metadata_file_path: str | None = None,
         metadata_last_modified: str | None = None,
         process_attachments: bool = False,
-        kwargs: dict[str, Any] = {},
+        kwargs: dict[str, Any] = None,
     ):
+        # Avoid mutable default arg bug
+        if kwargs is None:
+            kwargs = {}
         self._file_path = file_path
         self._file = file
         self._content_source = content_source
@@ -106,14 +109,15 @@ class EmailPartitioningContext:
         kwargs: dict[str, Any],
     ) -> EmailPartitioningContext:
         """Construct and validate an instance."""
+        # The profiling shows this is the hotspot. Pass args positionally instead of using kwargs.
         return cls(
-            file_path=file_path,
-            file=file,
-            content_source=content_source,
-            metadata_file_path=metadata_file_path,
-            metadata_last_modified=metadata_last_modified,
-            process_attachments=process_attachments,
-            kwargs=kwargs,
+            file_path,
+            file,
+            content_source,
+            metadata_file_path,
+            metadata_last_modified,
+            process_attachments,
+            kwargs,
         )._validate()
 
     @lazyproperty
@@ -284,23 +288,28 @@ class EmailPartitioningContext:
 
     def _validate(self) -> EmailPartitioningContext:
         """Raise on first invalid option, return self otherwise."""
+
+        # Validate content_source first, failure likely fastest
+        if self._content_source not in VALID_CONTENT_SOURCES:
+            raise ValueError(
+                f"{repr(self._content_source)} is not a valid value for content_source;"
+                f" must be one of: {VALID_CONTENT_SOURCES}",
+            )
+
         if not self._file_path and not self._file:
             raise ValueError(
                 "no document specified; either a `filename` or `file` argument must be provided."
             )
 
         if self._file:
-            if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
-                self._file.read(0), bytes
-            ):
+            file_obj = self._file
+            # Avoid double method lookup in tight paths
+            read = file_obj.read
+            seek = file_obj.seek
+            if not isinstance(read(0), bytes):
                 raise ValueError("file object must be opened in binary mode")
-            self._file.seek(0)
-
-        if self._content_source not in VALID_CONTENT_SOURCES:
-            raise ValueError(
-                f"{repr(self._content_source)} is not a valid value for content_source;"
-                f" must be one of: {VALID_CONTENT_SOURCES}",
-            )
+            # Reset pointer efficiently
+            seek(0)
 
         return self
 

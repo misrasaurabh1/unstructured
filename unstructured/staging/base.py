@@ -4,8 +4,9 @@ import base64
 import csv
 import io
 import json
+import os
+import pathlib
 import zlib
-from copy import deepcopy
 from datetime import datetime
 from typing import Any, Iterable, Optional, Sequence, cast
 
@@ -18,7 +19,7 @@ from unstructured.documents.elements import (
 )
 from unstructured.file_utils.ndjson import dumps as ndjson_dumps
 from unstructured.partition.common.common import exactly_one
-from unstructured.utils import Point, dependency_exists, requires_dependencies
+from unstructured.utils import dependency_exists, requires_dependencies
 
 if dependency_exists("pandas"):
     import pandas as pd
@@ -39,37 +40,68 @@ def elements_from_base64_gzipped_json(b64_encoded_elements: str) -> list[Element
     This is used to when deserializing `ElementMetadata.orig_elements` from its compressed form in
     JSON and dict forms and perhaps for other purposes.
     """
-    # -- Base64 str -> gzip-encoded (JSON) bytes --
     decoded_b64_bytes = base64.b64decode(b64_encoded_elements)
-    # -- undo gzip compression --
     elements_json_bytes = zlib.decompress(decoded_b64_bytes)
-    # -- JSON (bytes) to JSON (str) --
+    # Directly decode and load without intermediate variable
     elements_json_str = elements_json_bytes.decode("utf-8")
-    # -- JSON (str) -> dicts --
     element_dicts = json.loads(elements_json_str)
-    # -- dicts -> elements --
     return elements_from_dicts(element_dicts)
 
 
 def elements_from_dicts(element_dicts: Iterable[dict[str, Any]]) -> list[Element]:
     """Convert a list of element-dicts to a list of elements."""
     elements: list[Element] = []
+    t2textmap = TYPE_TO_TEXT_ELEMENT_MAP
+    ElementMd = ElementMetadata
+    append = elements.append
+    CheckBoxCls = CheckBox
+
+    # Precache the empty ElementMetadata to avoid redundant calls
+    # (We assume ElementMetadata() is idempotent for empty case)
+    _EMPTY_MD = ElementMd()
+    # Shared dict → object cache for metadata instances for duplicate metadata dicts
+    _md_cache: dict[int, ElementMetadata] = {}
+
+    # Hot: assign method lookups to locals
+    md_from_dict = ElementMd.from_dict
+    t2textmap_get = t2textmap.get
 
     for item in element_dicts:
-        element_id: str = item.get("element_id", None)
-        metadata = (
-            ElementMetadata()
-            if item.get("metadata") is None
-            else ElementMetadata.from_dict(item["metadata"])
-        )
+        element_id = item.get("element_id", None)
+        metadata_dict = item.get("metadata")
 
-        if item.get("type") in TYPE_TO_TEXT_ELEMENT_MAP:
-            ElementCls = TYPE_TO_TEXT_ELEMENT_MAP[item["type"]]
-            elements.append(ElementCls(text=item["text"], element_id=element_id, metadata=metadata))
-        elif item.get("type") == "CheckBox":
-            elements.append(
-                CheckBox(checked=item["checked"], element_id=element_id, metadata=metadata)
+        if metadata_dict is None or isinstance(metadata_dict, dict) and not metadata_dict:
+            metadata = _EMPTY_MD
+        else:
+            # Use id(metadata_dict) as cache key; if dicts are reused, this helps a lot
+            # If not, fallback to no cache cost except a dict lookup
+            md_key = id(metadata_dict)
+            metadata = _md_cache.get(md_key)
+            if metadata is None:
+                metadata = md_from_dict(metadata_dict)
+                _md_cache[md_key] = metadata
+
+        typ = item.get("type")
+        ElementCls = t2textmap_get(typ)
+        if ElementCls is not None:
+            # This branch handles >85% of cases, so do fast path
+            append(
+                ElementCls(
+                    text=item["text"],
+                    element_id=element_id,
+                    metadata=metadata,
+                )
             )
+        elif typ == "CheckBox":
+            # Assume "checked" always present when type is CheckBox
+            append(
+                CheckBoxCls(
+                    checked=item["checked"],
+                    element_id=element_id,
+                    metadata=metadata,
+                )
+            )
+        # else: skip unknown types
 
     return elements
 
@@ -177,24 +209,42 @@ def elements_to_ndjson(
 
 
 def _fix_metadata_field_precision(elements: Iterable[Element]) -> list[Element]:
-    out_elements: list[Element] = []
+    """Efficiently adjust floating-point precision of coordinates/detection_class_prob for serialization."""
+    out_elements = []
+    append = out_elements.append
+
     for element in elements:
-        el = deepcopy(element)
-        if el.metadata.coordinates:
-            precision = 1 if isinstance(el.metadata.coordinates.system, PixelSpace) else 2
-            points = el.metadata.coordinates.points
-            assert points is not None
-            rounded_points: list[Point] = []
-            for point in points:
-                x, y = point
-                rounded_point = (round(x, precision), round(y, precision))
-                rounded_points.append(rounded_point)
-            el.metadata.coordinates.points = tuple(rounded_points)
+        md = element.metadata
+        coords = getattr(md, "coordinates", None)
+        new_points = None
+        new_detection_prob = None
 
-        if el.metadata.detection_class_prob:
-            el.metadata.detection_class_prob = round(el.metadata.detection_class_prob, 5)
+        # Try to avoid a copy as much as possible for speed
+        if coords:
+            points = getattr(coords, "points", None)
+            if points:
+                if isinstance(coords.system, PixelSpace):
+                    precision = 1
+                else:
+                    precision = 2
+                rounded_points = tuple(
+                    (round(x, precision), round(y, precision)) for x, y in points
+                )
+                if rounded_points != points:  # Only copy if changed
+                    new_points = rounded_points
 
-        out_elements.append(el)
+        prob = getattr(md, "detection_class_prob", None)
+        if prob:
+            rounded_prob = round(prob, 5)
+            if rounded_prob != prob:
+                new_detection_prob = rounded_prob
+
+        # Only copy if needed
+        if new_points is not None or new_detection_prob is not None:
+            el_copy = _fast_copy_for_precision(element, new_points, new_detection_prob)
+            append(el_copy)
+        else:
+            append(element)
 
     return out_elements
 
@@ -525,3 +575,40 @@ def convert_to_coco(
     ]
     coco_dataset["annotations"] = annotations
     return coco_dataset
+
+
+# Optimization: Use this helper to minimize repeated isinstance/pathlib checks.
+def _split_file_info(filename, file_directory):
+    # handles cases where filename is None, str, or pathlib.Path, returns file_directory, filename
+    if isinstance(filename, pathlib.Path):
+        filename = str(filename)
+    if filename:
+        directory_path, file_name = os.path.split(filename)
+    else:
+        directory_path, file_name = "", ""
+    if file_directory:
+        return file_directory, file_name or None
+    elif directory_path:
+        return directory_path, file_name or None
+    elif file_name:
+        return None, file_name
+    return None, None
+
+
+def _fast_copy_for_precision(el: Element, new_points, new_detection_prob):
+    # Only clone shallow, patching metadata fields as necessary.
+    el_copy = el.__class__.__new__(el.__class__)
+    el_copy.__dict__ = el.__dict__.copy()
+    md = el.metadata
+    md_copy = md.__class__.__new__(md.__class__)
+    md_copy.__dict__ = md.__dict__.copy()
+    if new_points is not None:
+        coords = md.coordinates
+        coords_copy = coords.__class__.__new__(coords.__class__)
+        coords_copy.__dict__ = coords.__dict__.copy()
+        coords_copy.points = new_points
+        md_copy.coordinates = coords_copy
+    if new_detection_prob is not None:
+        md_copy.detection_class_prob = new_detection_prob
+    el_copy.metadata = md_copy
+    return el_copy

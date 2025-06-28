@@ -15,6 +15,14 @@ from typing import Optional
 
 from unstructured.partition.utils.constants import OCR_AGENT_TESSERACT
 
+"""
+This module contains variables that can permitted to be tweaked by the system environment. For
+example, model parameters that changes the output of an inference call. Constants do NOT belong in
+this module. Constants are values that are usually names for common options (e.g., color names) or
+settings that should not be altered without making a code change (e.g., definition of 1Gb of memory
+in bytes). Constants should go into `./constants.py`
+"""
+
 
 @lru_cache(maxsize=1)
 def get_tempdir(dir: str) -> str:
@@ -41,8 +49,14 @@ class ENVConfig:
         return default_value
 
     def _get_float(self, var: str, default_value: float) -> float:
-        if value := self._get_string(var):
-            return float(value)
+        # Inline string fetch and float conversion to avoid unnecessary temporaries
+        try:
+            value = os.environ[var]
+            # Only convert if non-empty
+            if value:
+                return float(value)
+        except KeyError:
+            pass
         return default_value
 
     def _get_bool(self, var: str, default_value: bool) -> bool:

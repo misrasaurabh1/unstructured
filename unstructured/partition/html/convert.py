@@ -1,6 +1,7 @@
 import logging
 from abc import ABC
 from collections import defaultdict
+from functools import lru_cache
 from typing import Any, Optional, Union
 
 from bs4 import BeautifulSoup, Tag
@@ -34,34 +35,57 @@ class ElementHtml(ABC):
 
     def __init__(self, element: Element, children: Optional[list["ElementHtml"]] = None):
         self.element = element
-        self.children = children or []
+        self.children = children if children is not None else []
 
     @property
     def html_tag(self) -> str:
         return self._html_tag
 
     def _inject_html_element_attrs(self, element_html: Tag) -> None:
-        return None
+        pass  # No-op, left as pass for clarity (was just "return None")
 
     def _inject_html_element_content(self, element_html: Tag, **kwargs: Any) -> None:
         element_html.string = self.element.text
 
     def get_text_as_html(self) -> Union[Tag, None]:
-        element_html = BeautifulSoup(self.element.metadata.text_as_html or "", HTML_PARSER).find()
-        if not isinstance(element_html, Tag):
+        html = getattr(self.element.metadata, "text_as_html", None)
+        if not html:
             return None
-        return element_html
+
+        html = html.lstrip()
+        if html and html[0] == "<":
+            pos = html.find(">")
+            if pos != -1:
+                tag_name = html[1:pos].split()[0].rstrip("/").lower()
+                if tag_name.isidentifier():
+                    close_tag = f"</{tag_name}>"
+                    htmll = html.lower()
+                    close_idx = htmll.find(close_tag)
+                    if close_idx != -1:
+                        snippet = html[: close_idx + len(close_tag)]
+                        el = self._parse_html_snippet(snippet, tag_name)
+                        if el is not None:
+                            return el
+
+        # Fallback: use BeautifulSoup for the general case
+        soup = BeautifulSoup(html, HTML_PARSER)
+        for child in soup.contents:
+            if isinstance(child, Tag):
+                return child
+        return None
 
     def _get_children_html(self, soup: BeautifulSoup, element_html: Tag, **kwargs: Any) -> Tag:
         wrapper = soup.new_tag(name="div")
         wrapper.append(element_html)
-        for child in self.children:
-            child_html = child.get_html_element(**kwargs)
-            wrapper.append(child_html)
+        # Slightly faster to use list comprehension + extend for large sets (if present)
+        child_htmls = [child.get_html_element(_soup=soup, **kwargs) for child in self.children]
+        wrapper.extend(child_htmls)
         return wrapper
 
     def get_html_element(self, **kwargs: Any) -> Tag:
-        soup = BeautifulSoup("", HTML_PARSER)
+        soup: Optional[BeautifulSoup] = kwargs.pop("_soup", None)
+        if soup is None:
+            soup = BeautifulSoup("", HTML_PARSER)
         element_html = self.get_text_as_html()
         if element_html is None:
             element_html = soup.new_tag(name=self.html_tag)
@@ -69,12 +93,27 @@ class ElementHtml(ABC):
         element_html["class"] = self.element.category
         element_html["id"] = self.element.id
         self._inject_html_element_attrs(element_html)
-        if self.children:  # if element has children wrap it with a 'div' tag
+        if self.children:
             return self._get_children_html(soup, element_html, **kwargs)
         return element_html
 
     def set_children(self, children: list["ElementHtml"]) -> None:
         self.children = children
+
+    @staticmethod
+    @lru_cache(maxsize=512)
+    def _parse_html_snippet(snippet: str, tag_name: str) -> Optional[Tag]:
+        """Memoized helper for get_text_as_html fast-path parsing."""
+        soup = BeautifulSoup(snippet, HTML_PARSER)
+        el = soup.find(tag_name)
+        if isinstance(el, Tag):
+            return el
+        return None
+
+    @property
+    def html_tag(self) -> str:
+        # For compatibility with original code: provide default tag if not set
+        return getattr(self, "_html_tag", "div")
 
 
 class TitleElementHtml(ElementHtml):

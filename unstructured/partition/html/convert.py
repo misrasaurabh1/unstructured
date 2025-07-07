@@ -47,10 +47,33 @@ class ElementHtml(ABC):
         element_html.string = self.element.text
 
     def get_text_as_html(self) -> Union[Tag, None]:
-        element_html = BeautifulSoup(self.element.metadata.text_as_html or "", HTML_PARSER).find()
-        if not isinstance(element_html, Tag):
+        html = getattr(self.element.metadata, "text_as_html", None)
+        if not html:  # Fast-path for empty input
             return None
-        return element_html
+
+        # Fast-path: try to extract the first tag using string operations (for simple HTML snippets)
+        html = html.lstrip()
+        if html and html[0] == "<":
+            pos = html.find(">")
+            if pos != -1:
+                tag_name = html[1:pos].split()[0].rstrip("/").lower()
+                if tag_name.isidentifier():
+                    # Try to slice out a minimal well-formed snippet for BS
+                    close_tag = f"</{tag_name}>"
+                    close_idx = html.lower().find(close_tag)
+                    if close_idx != -1:
+                        snippet = html[: close_idx + len(close_tag)]
+                        soup = BeautifulSoup(snippet, "html.parser")
+                        el = soup.find(tag_name)
+                        if isinstance(el, Tag):
+                            return el
+
+        # Fallback: use BeautifulSoup for the general case
+        soup = BeautifulSoup(html, "html.parser")
+        for child in soup.contents:
+            if isinstance(child, Tag):
+                return child
+        return None
 
     def _get_children_html(self, soup: BeautifulSoup, element_html: Tag, **kwargs: Any) -> Tag:
         wrapper = soup.new_tag(name="div")

@@ -61,16 +61,21 @@ class ElementHtml(ABC):
         return wrapper
 
     def get_html_element(self, **kwargs: Any) -> Tag:
-        soup = BeautifulSoup("", HTML_PARSER)
+        # Use shared soup instead of creating one per call
         element_html = self.get_text_as_html()
         if element_html is None:
-            element_html = soup.new_tag(name=self.html_tag)
+            element_html = _SPARSE_SOUP.new_tag(name=self.html_tag)
             self._inject_html_element_content(element_html, **kwargs)
+
+        # Set attributes directly
         element_html["class"] = self.element.category
         element_html["id"] = self.element.id
         self._inject_html_element_attrs(element_html)
-        if self.children:  # if element has children wrap it with a 'div' tag
-            return self._get_children_html(soup, element_html, **kwargs)
+
+        # Only wrap if there are children
+        if self.children:
+            # Pass the shared soup
+            return self._get_children_html(_SPARSE_SOUP, element_html, **kwargs)
         return element_html
 
     def set_children(self, children: list["ElementHtml"]) -> None:
@@ -122,7 +127,9 @@ class UnorderedListElementHtml(ElementHtml):
     _html_tag = "ul"
 
     def _get_children_html(self, soup: BeautifulSoup, element_html: Tag, **kwargs: Any) -> Tag:
+        # Efficient in-place append; no changes needed here
         for child in self.children:
+            # Directly obtain and append each child's html
             child_html = child.get_html_element(**kwargs)
             element_html.append(child_html)
         return element_html
@@ -315,3 +322,6 @@ def elements_to_html(
     for element_html in elements_html:
         soup.body.append(element_html)
     return soup.prettify()
+
+
+_SPARSE_SOUP = BeautifulSoup("", HTML_PARSER)

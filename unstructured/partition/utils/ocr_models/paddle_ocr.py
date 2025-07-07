@@ -4,10 +4,11 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image as PILImage
+from unstructured_inference.inference.elements import TextRegion, TextRegions
 
 from unstructured.documents.elements import ElementType
 from unstructured.logger import logger, trace_logger
-from unstructured.partition.utils.constants import Source
+from unstructured.partition.utils.constants import Source as SourcePartition
 from unstructured.partition.utils.ocr_models.ocr_interface import OCRAgent
 from unstructured.utils import requires_dependencies
 
@@ -115,28 +116,28 @@ class OCRAgentPaddle(OCRAgent):
           dictionary will result in its associated bounding box being ignored.
         """
 
-        from unstructured_inference.inference.elements import TextRegions
-
-        from unstructured.partition.pdf_image.inference_utils import build_text_region_from_coords
-
         text_regions: list[TextRegion] = []
-        for idx in range(len(ocr_data)):
-            res = ocr_data[idx]
+        src_val = SourcePartition.OCR_PADDLE  # micro-opt: lookup once
+        for res in ocr_data:
             if not res:
                 continue
 
             for line in res:
-                x1 = min([i[0] for i in line[0]])
-                y1 = min([i[1] for i in line[0]])
-                x2 = max([i[0] for i in line[0]])
-                y2 = max([i[1] for i in line[0]])
+                # Use zip(*points) for efficient coordinate extraction
+                points = line[0]
+                xs, ys = zip(*points)
+                x1, x2 = min(xs), max(xs)
+                y1, y2 = min(ys), max(ys)
                 text = line[1][0]
                 if not text:
                     continue
-                cleaned_text = text.strip()
+                # Only strip if needed
+                cleaned_text = (
+                    text.strip() if (text and (text[0].isspace() or text[-1].isspace())) else text
+                )
                 if cleaned_text:
-                    text_region = build_text_region_from_coords(
-                        x1, y1, x2, y2, text=cleaned_text, source=Source.OCR_PADDLE
+                    text_region = TextRegion.from_coords(
+                        x1, y1, x2, y2, text=cleaned_text, source=src_val
                     )
                     text_regions.append(text_region)
 

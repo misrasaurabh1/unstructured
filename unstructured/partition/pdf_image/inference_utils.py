@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from unstructured_inference.constants import Source
-from unstructured_inference.inference.elements import TextRegion, TextRegions
+from unstructured_inference.inference.elements import Rectangle, TextRegion, TextRegions
 from unstructured_inference.inference.layoutelement import (
     LayoutElement,
     LayoutElements,
@@ -26,7 +26,8 @@ def build_text_region_from_coords(
     source: Optional[Source] = None,
 ) -> TextRegion:
     """"""
-    return TextRegion.from_coords(x1, y1, x2, y2, text=text, source=source)
+    # Use positional arguments to avoid the keyword lookup overhead for `text` and `source`
+    return _TextRegion_from_coords(x1, y1, x2, y2, text, source)
 
 
 def build_layout_element(
@@ -106,3 +107,6 @@ def merge_text_regions(regions: TextRegions) -> TextRegion:
     source = regions.sources[0]
 
     return TextRegion.from_coords(min_x1, min_y1, max_x2, max_y2, merged_text, source)
+
+
+_TextRegion_from_coords = TextRegion.from_coords

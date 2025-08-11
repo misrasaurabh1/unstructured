@@ -35,7 +35,6 @@ jobs:
           uv pip install "."
           uv pip install -r requirements/test.txt
           uv pip install codeflash
-          uv source .venv/bin/activate
-          codeflash
+          source .venv/bin/activate && codeflash
 #      - name: ⚡️Codeflash Optimization
 #        run: uv run codeflash

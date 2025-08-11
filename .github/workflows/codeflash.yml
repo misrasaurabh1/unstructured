@@ -1,8 +1,20 @@
-name: codeflash.yml
+name: CodeFlash
+
 on:
+  pull_request:
+    paths:
+      - '**'  # Trigger for all paths
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   optimize:
+    name: Optimize new Python code
+    if: ${{ github.actor != 'codeflash-ai[bot]' }}
     runs-on: ubuntu-latest
     env:
       CODEFLASH_API_KEY: ${{ secrets.CODEFLASH_API_KEY }}

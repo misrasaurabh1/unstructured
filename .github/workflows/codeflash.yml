@@ -20,18 +20,20 @@ jobs:
       CODEFLASH_API_KEY: ${{ secrets.CODEFLASH_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Setup virtual environment
-        uses: ./.github/actions/base-cache
+          fetch-depth: 0
+      - name: 🐍 Set up Python 3.12
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          python-version: 3.12
+#      - name: Setup virtual environment
+#        uses: ./.github/actions/base-cache
+#        with:
+#          python-version: "3.12"
       - name: Install Environment
         run: |
-          source .venv/bin/activate
-          make install-ci
-          pip install codeflash
+          uv pip install "."
+          uv pip install -r requirements/test.txt
+          uv pip pip install codeflash
       - name: ⚡️Codeflash Optimization
-        run: codeflash
+        run: uv run codeflash

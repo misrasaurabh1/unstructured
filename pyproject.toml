@@ -56,8 +56,6 @@ select = [
     "UP034",    # -- Avoid extraneous parentheses --
     "W",        # -- Warnings, including invalid escape-sequence --
 ]
-[project]
-name = "unstrutured"
 [tool.codeflash]
 module-root = "unstructured"
 tests-root = "test_unstructured"

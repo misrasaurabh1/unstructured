@@ -1,12 +1,14 @@
 ## 0.18.14-dev0
 
 ### Enhancements
+- Speed up function sentence_count by 59% (codeflash)
 
 ### Features
 
 ### Fixes
 
 - **change short text language detection log to debug** reduce warning level log spamming
+
 
 ## 0.18.13
 

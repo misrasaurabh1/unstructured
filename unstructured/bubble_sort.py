@@ -1,4 +1,7 @@
-def sorter(arr):
+from __future__ import annotations
+
+
+def sorter(arr: list[int | float]) -> list[int | float]:
     print("codeflash stdout: Sorting list")
     for i in range(len(arr)):
         for j in range(len(arr) - 1):

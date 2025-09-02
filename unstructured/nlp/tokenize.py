@@ -47,10 +47,10 @@ if os.getenv("AUTO_DOWNLOAD_NLTK", "True").lower() == "true":
     download_nltk_packages()
 
 
-@lru_cache(maxsize=CACHE_MAX_SIZE)
 def sent_tokenize(text: str) -> List[str]:
     """A wrapper around the NLTK sentence tokenizer with LRU caching enabled."""
-    return _sent_tokenize(text)
+    # Return a list to preserve output type and isolation
+    return list(_cached_sent_tokenize(text))
 
 
 @lru_cache(maxsize=CACHE_MAX_SIZE)
@@ -69,3 +69,9 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
         tokens = _word_tokenize(sentence)
         parts_of_speech.extend(_pos_tag(tokens))
     return parts_of_speech
+
+
+# Explicit caching with tuple conversion to avoid mutability/memory issues
+@lru_cache(maxsize=128)
+def _cached_sent_tokenize(text: str) -> tuple:
+    return tuple(_sent_tokenize(text))

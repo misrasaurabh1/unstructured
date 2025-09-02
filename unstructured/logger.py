@@ -6,6 +6,7 @@ logger = logging.getLogger("unstructured")
 trace_logger = logging.getLogger("unstructured.trace")
 
 # Create a custom logging level
+# inconsequential comment 1
 DETAIL = 15
 logging.addLevelName(DETAIL, "DETAIL")
 

@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+
+def sorter(arr: list[int | float]) -> list[int | float]:
+    print("codeflash stdout: Sorting list")
+    for i in range(len(arr)):
+        for j in range(len(arr) - 1):
+            if arr[j] > arr[j + 1]:
+                temp = arr[j]
+                arr[j] = arr[j + 1]
+                arr[j + 1] = temp
+    print(f"result: {arr}")
+    return arr

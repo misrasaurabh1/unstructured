@@ -47,17 +47,23 @@ class ElementHtml(ABC):
         element_html.string = self.element.text
 
     def get_text_as_html(self) -> Union[Tag, None]:
-        element_html = BeautifulSoup(self.element.metadata.text_as_html or "", HTML_PARSER).find()
-        if not isinstance(element_html, Tag):
+        html_str = self.element.metadata.text_as_html
+        if not html_str:
             return None
-        return element_html
+        soup = BeautifulSoup(html_str, HTML_PARSER)
+        for child in soup.contents:
+            if isinstance(child, Tag):
+                return child
+        return None
 
     def _get_children_html(self, soup: BeautifulSoup, element_html: Tag, **kwargs: Any) -> Tag:
         wrapper = soup.new_tag(name="div")
         wrapper.append(element_html)
-        for child in self.children:
-            child_html = child.get_html_element(_soup=soup, **kwargs)
-            wrapper.append(child_html)
+        if self.children:
+            children_html = [
+                child.get_html_element(_soup=soup, **kwargs) for child in self.children
+            ]
+            wrapper.extend(children_html)
         return wrapper
 
     def get_html_element(self, **kwargs: Any) -> Tag:

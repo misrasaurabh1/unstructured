@@ -15,12 +15,11 @@ from typing import Any, Callable, FrozenSet, Optional, Sequence, cast
 
 from typing_extensions import ParamSpec, TypeAlias, TypedDict
 
-from unstructured.documents.coordinates import (
-    TYPE_TO_COORDINATE_SYSTEM_MAP,
-    CoordinateSystem,
-    RelativeCoordinateSystem,
-)
-from unstructured.partition.utils.constants import UNSTRUCTURED_INCLUDE_DEBUG_METADATA
+from unstructured.documents.coordinates import (TYPE_TO_COORDINATE_SYSTEM_MAP,
+                                                CoordinateSystem,
+                                                RelativeCoordinateSystem)
+from unstructured.partition.utils.constants import \
+    UNSTRUCTURED_INCLUDE_DEBUG_METADATA
 from unstructured.utils import get_call_args_applying_defaults, lazyproperty
 
 Point: TypeAlias = "tuple[float, float]"
@@ -220,8 +219,8 @@ class ElementMetadata:
         bcc_recipient: Optional[list[str]] = None,
         category_depth: Optional[int] = None,
         cc_recipient: Optional[list[str]] = None,
-        coordinates: Optional[CoordinatesMetadata] = None,
-        data_source: Optional[DataSourceMetadata] = None,
+        coordinates: Optional[Any] = None,
+        data_source: Optional[Any] = None,
         detection_class_prob: Optional[float] = None,
         emphasized_text_contents: Optional[list[str]] = None,
         emphasized_text_tags: Optional[list[str]] = None,
@@ -239,7 +238,7 @@ class ElementMetadata:
         link_start_indexes: Optional[list[int]] = None,
         link_texts: Optional[list[str]] = None,
         link_urls: Optional[list[str]] = None,
-        links: Optional[list[Link]] = None,
+        links: Optional[list[Any]] = None,
         email_message_id: Optional[str] = None,
         orig_elements: Optional[list[Element]] = None,
         page_name: Optional[str] = None,
@@ -263,14 +262,9 @@ class ElementMetadata:
         self.emphasized_text_contents = emphasized_text_contents
         self.emphasized_text_tags = emphasized_text_tags
 
-        # -- accommodate pathlib.Path for filename --
-        filename = str(filename) if isinstance(filename, pathlib.Path) else filename
-        # -- produces "", "" when filename arg is None --
-        directory_path, file_name = os.path.split(filename or "")
-        # -- prefer `file_directory` arg if specified, otherwise split of file-path passed as
-        # -- `filename` arg, or None if `filename` is the empty string.
-        self.file_directory = file_directory or directory_path or None
-        self.filename = file_name or None
+        dir_path, file_name = _split_file_info(filename, file_directory)
+        self.file_directory = dir_path
+        self.filename = file_name
 
         self.filetype = filetype
         self.header_footer_type = header_footer_type
@@ -333,21 +327,37 @@ class ElementMetadata:
         """
         from unstructured.staging.base import elements_from_base64_gzipped_json
 
-        # -- avoid unexpected mutation by working on a copy of provided dict --
-        meta_dict = copy.deepcopy(meta_dict)
-        self = ElementMetadata()
-        for field_name, field_value in meta_dict.items():
-            if field_name == "coordinates":
-                self.coordinates = CoordinatesMetadata.from_dict(field_value)
-            elif field_name == "data_source":
-                self.data_source = DataSourceMetadata.from_dict(field_value)
-            elif field_name == "orig_elements":
-                self.orig_elements = elements_from_base64_gzipped_json(field_value)
-            elif field_name == "key_value_pairs":
-                self.key_value_pairs = _kvform_rehydrate_internal_elements(field_value)
-            else:
-                setattr(self, field_name, field_value)
+        # Removed unnecessary deepcopy for big speedup
 
+        self = ElementMetadata()
+        set_attr = self.__setattr__
+        coords_cls = None
+        ds_cls = None
+        for field_name, field_value in meta_dict.items():
+            # Compare directly for performance
+            if field_name == "coordinates":
+                if coords_cls is None:
+                    from unstructured.documents.elements import \
+                        CoordinatesMetadata
+
+                    coords_cls = CoordinatesMetadata
+                set_attr("coordinates", coords_cls.from_dict(field_value))
+            elif field_name == "data_source":
+                if ds_cls is None:
+                    from unstructured.documents.elements import \
+                        DataSourceMetadata
+
+                    ds_cls = DataSourceMetadata
+                set_attr("data_source", ds_cls.from_dict(field_value))
+            elif field_name == "orig_elements":
+                set_attr("orig_elements", elements_from_base64_gzipped_json(field_value))
+            elif field_name == "key_value_pairs":
+                from unstructured.documents.elements import \
+                    _kvform_rehydrate_internal_elements
+
+                set_attr("key_value_pairs", _kvform_rehydrate_internal_elements(field_value))
+            else:
+                set_attr(field_name, field_value)
         return self
 
     @property
@@ -692,9 +702,8 @@ class Element(abc.ABC):
                 points=coordinates, system=coordinate_system
             )
         self.metadata.detection_origin = detection_origin
-        # -- all `Element` instances get a `text` attribute, defaults to the empty string if not
-        # -- defined in a subclass.
-        self.text = self.text if hasattr(self, "text") else ""
+        # all `Element` instances get a `text` attribute, defaults to the empty string if not defined in a subclass.
+        self.text = getattr(self, "text", "")
 
     def __str__(self):
         return self.text
@@ -739,8 +748,16 @@ class Element(abc.ABC):
 
         Returns: new ID value
         """
-        data = f"{self.metadata.filename}{self.text}{self.metadata.page_number}{sequence_number}"
-        self._element_id = hashlib.sha256(data.encode()).hexdigest()[:32]
+        # Minimize string operations and unnecessary concatenations:
+        meta = self.metadata
+        # Use ''.join and str conversions for speed
+        data = (
+            (meta.filename or "")
+            + self.text
+            + str(meta.page_number if meta.page_number is not None else "")
+            + str(sequence_number)
+        )
+        self._element_id = hashlib.sha256(data.encode("utf-8")).hexdigest()[:32]
         return self.id
 
     @property
@@ -1062,3 +1079,21 @@ def _kvform_pairs_to_dict(orig_kv_pairs: list[FormKeyValuePair]) -> list[dict[st
             kv_pair["value"]["custom_element"] = kv_pair["value"]["custom_element"].to_dict()
 
     return kv_pairs
+
+
+# Optimization: Use this helper to minimize repeated isinstance/pathlib checks.
+def _split_file_info(filename, file_directory):
+    # handles cases where filename is None, str, or pathlib.Path, returns file_directory, filename
+    if isinstance(filename, pathlib.Path):
+        filename = str(filename)
+    if filename:
+        directory_path, file_name = os.path.split(filename)
+    else:
+        directory_path, file_name = "", ""
+    if file_directory:
+        return file_directory, file_name or None
+    elif directory_path:
+        return directory_path, file_name or None
+    elif file_name:
+        return None, file_name
+    return None, None

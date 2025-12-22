@@ -86,8 +86,10 @@ class EmailPartitioningContext:
         metadata_file_path: str | None = None,
         metadata_last_modified: str | None = None,
         process_attachments: bool = False,
-        kwargs: dict[str, Any] = {},
+        kwargs: dict[str, Any] = None,
     ):
+        if kwargs is None:
+            kwargs = {}
         self._file_path = file_path
         self._file = file
         self._content_source = content_source
@@ -290,23 +292,33 @@ class EmailPartitioningContext:
 
     def _validate(self) -> EmailPartitioningContext:
         """Raise on first invalid option, return self otherwise."""
-        if not self._file_path and not self._file:
+
+        # Fast path: fail immediately on missing file or file_path
+        file_path = self._file_path
+        file = self._file
+        content_source = self._content_source
+
+        if not file_path and not file:
             raise ValueError(
                 "no document specified; either a `filename` or `file` argument must be provided."
             )
 
-        if self._file:
-            if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
-                self._file.read(0), bytes
-            ):
-                raise ValueError("file object must be opened in binary mode")
-            self._file.seek(0)
-
-        if self._content_source not in VALID_CONTENT_SOURCES:
+        # Validate content_source early
+        if content_source not in (
+            "text/html",
+            "text/plain",
+        ):  # inline VALID_CONTENT_SOURCES for speed
             raise ValueError(
-                f"{repr(self._content_source)} is not a valid value for content_source;"
-                f" must be one of: {VALID_CONTENT_SOURCES}",
+                f"{repr(content_source)} is not a valid value for content_source;"
+                " must be one of: ('text/html', 'text/plain')"
             )
+        if file:
+            # Only cache methods if file is present
+            read = file.read
+            seek = file.seek
+            if not isinstance(read(0), bytes):
+                raise ValueError("file object must be opened in binary mode")
+            seek(0)
 
         return self
 

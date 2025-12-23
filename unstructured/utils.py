@@ -10,21 +10,10 @@ import platform
 import subprocess
 import tempfile
 import threading
-from functools import wraps
+from functools import lru_cache, wraps
 from itertools import combinations
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Generic,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    TypeVar,
-    cast,
-)
+from typing import (TYPE_CHECKING, Any, Callable, Generic, Iterable, Iterator,
+                    List, Optional, Tuple, TypeVar, cast)
 
 import requests
 from typing_extensions import ParamSpec, TypeAlias
@@ -227,6 +216,7 @@ def requires_dependencies(
     return decorator
 
 
+@lru_cache(maxsize=16)
 def dependency_exists(dependency: str):
     try:
         importlib.import_module(dependency)

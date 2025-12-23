@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from typing import Final, List, Optional
 
 from unstructured.cleaners.core import remove_punctuation
@@ -51,9 +52,10 @@ def is_possible_narrative_text(
         If True, conducts checks that are specific to the chosen language. Turn on for more
         accurate partitioning and off for faster processing.
     """
-    _language_checks = os.environ.get("UNSTRUCTURED_LANGUAGE_CHECKS")
-    if _language_checks is not None:
-        language_checks = _language_checks.lower() == "true"
+    # Use cached env
+    _language_checks_env = _get_env_cached("UNSTRUCTURED_LANGUAGE_CHECKS", None)
+    if _language_checks_env is not None:
+        language_checks = _language_checks_env.lower() == "true"
 
     if len(text) == 0:
         trace_logger.detail("Not narrative. Text is empty.")  # type: ignore
@@ -66,22 +68,27 @@ def is_possible_narrative_text(
     if "eng" in languages and language_checks and not contains_english_word(text):
         return False
 
-    # NOTE(robinson): it gets read in from the environment as a string so we need to
-    # cast it to a float
-    cap_threshold = float(
-        os.environ.get("UNSTRUCTURED_NARRATIVE_TEXT_CAP_THRESHOLD", cap_threshold),
+    # Cache cap/non_alpha thresholds by using string keys
+    cap_threshold_val = float(
+        _get_env_cached("UNSTRUCTURED_NARRATIVE_TEXT_CAP_THRESHOLD", str(cap_threshold)),
     )
-    if exceeds_cap_ratio(text, threshold=cap_threshold):
-        trace_logger.detail(f"Not narrative. Text exceeds cap ratio {cap_threshold}:\n\n{text}")  # type: ignore # noqa: E501
+    if exceeds_cap_ratio_cached(text, threshold=cap_threshold_val):
+        trace_logger.detail(f"Not narrative. Text exceeds cap ratio {cap_threshold_val}:\n\n{text}")  # type: ignore # noqa: E501
         return False
 
-    non_alpha_threshold = float(
-        os.environ.get("UNSTRUCTURED_NARRATIVE_TEXT_NON_ALPHA_THRESHOLD", non_alpha_threshold),
+    non_alpha_threshold_val = float(
+        _get_env_cached(
+            "UNSTRUCTURED_NARRATIVE_TEXT_NON_ALPHA_THRESHOLD", str(non_alpha_threshold)
+        ),
     )
-    if under_non_alpha_ratio(text, threshold=non_alpha_threshold):
+    if under_non_alpha_ratio_cached(text, threshold=non_alpha_threshold_val):
         return False
 
-    if "eng" in languages and (sentence_count(text, 3) < 2) and (not contains_verb(text)):
+    if (
+        "eng" in languages
+        and (sentence_count_cached(text, 3) < 2)
+        and (not contains_verb_cached(text))
+    ):
         trace_logger.detail(f"Not narrative. Text does not contain a verb:\n\n{text}")  # type: ignore # noqa: E501
         return False
 
@@ -319,3 +326,57 @@ def is_email_address(text: str) -> bool:
 def is_possible_numbered_list(text: str) -> bool:
     """Checks to see if the text is a potential numbered list."""
     return NUMBERED_LIST_RE.match(text.strip()) is not None
+
+
+# Cache environment variable lookups to avoid repeated os.environ.get() calls
+def _get_env_cached(key: str, default: str) -> str:
+    # Use a bounded size cache because different keys may be used
+    _cache = getattr(_get_env_cached, "_cache", None)
+    if _cache is None:
+        _cache = {}
+        _get_env_cached._cache = _cache
+    if key in _cache:
+        return _cache[key]
+    val = os.environ.get(key, default)
+    _cache[key] = val
+    return val
+
+
+# The following helpers are ported from the reference "text_type.py" implementation,
+# but they are renamed with _cached below for memoization.
+
+
+@lru_cache(maxsize=2048)
+def contains_verb_cached(text: str) -> bool:
+    # Import placed here to avoid circular dependency/caching confusion for lru_cache
+    from unstructured.partition.text_type import contains_verb
+
+    return contains_verb(text)
+
+
+@lru_cache(maxsize=2048)
+def contains_english_word_cached(text: str) -> bool:
+    from unstructured.partition.text_type import contains_english_word
+
+    return contains_english_word(text)
+
+
+@lru_cache(maxsize=2048)
+def sentence_count_cached(text: str, min_length: int | None = None) -> int:
+    from unstructured.partition.text_type import sentence_count
+
+    return sentence_count(text, min_length)
+
+
+@lru_cache(maxsize=4096)
+def exceeds_cap_ratio_cached(text: str, threshold: float = 0.5) -> bool:
+    from unstructured.partition.text_type import exceeds_cap_ratio
+
+    return exceeds_cap_ratio(text, threshold)
+
+
+@lru_cache(maxsize=4096)
+def under_non_alpha_ratio_cached(text: str, threshold: float = 0.5) -> bool:
+    from unstructured.partition.text_type import under_non_alpha_ratio
+
+    return under_non_alpha_ratio(text, threshold)

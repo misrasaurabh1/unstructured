@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Iterable, Iterator, Optional
 
 import iso639  # pyright: ignore[reportMissingTypeStubs]
@@ -16,6 +17,8 @@ from unstructured.partition.utils.constants import (
     TESSERACT_LANGUAGES_AND_CODES,
     TESSERACT_LANGUAGES_SPLITTER,
 )
+
+_ASCII_ONLY_RE = re.compile(r"^[\x00-\x7F]+$")
 
 # pytesseract.get_languages(config="") only shows user installed language packs,
 # so manually include the list of all currently supported Tesseract languages
@@ -363,11 +366,8 @@ def _convert_language_code_to_pytesseract_lang_code(lang: str) -> str:
 
 
 def _get_iso639_language_object(lang: str) -> Optional[iso639.Language]:
-    try:
-        return iso639.Language.match(lang.lower())  # pyright: ignore[reportUnknownMemberType]
-    except iso639.LanguageNotFoundError:
-        logger.warning(f"{lang} is not a valid standard language code.")
-        return None
+    # Only lowercase here, let the cache handle repeated lookups of same value
+    return _cached_iso639_match(lang.lower())
 
 
 def _get_all_tesseract_langcodes_with_prefix(prefix: str) -> list[str]:
@@ -402,7 +402,7 @@ def detect_languages(
 
     # If text contains special characters (like ñ, å, or Korean/Mandarin/etc.) it will NOT default
     # to English. It will default to English if text is only ascii characters and is short.
-    if re.match(r"^[\x00-\x7F]+$", text) and len(text.split()) < 5:
+    if _ASCII_ONLY_RE.match(text) and len(text.split()) < 5:
         logger.debug(f'short text: "{text}". Defaulting to English.')
         return ["eng"]
 
@@ -452,9 +452,14 @@ def detect_languages(
                     langdetect_langs.append(language.part3)
 
         # remove duplicate chinese (if exists) without modifying order
+
+        # remove duplicate chinese (if exists) without modifying order
+        # Use a set for O(1) membership test to avoid N^2 cost, but maintain order
+        doc_languages_set = set(doc_languages)
         for lang in langdetect_langs:
-            if lang not in doc_languages:
+            if lang not in doc_languages_set:
                 doc_languages.append(lang)
+                doc_languages_set.add(lang)
 
     return doc_languages
 
@@ -522,3 +527,12 @@ def _clean_ocr_languages_arg(ocr_languages: list[str] | str) -> str:
     ocr_languages = re.sub(r"[\[\]]", "", ocr_languages)
 
     return ocr_languages
+
+
+@lru_cache(maxsize=256)
+def _cached_iso639_match(lang_lower: str) -> Optional[iso639.Language]:
+    try:
+        return iso639.Language.match(lang_lower)
+    except iso639.LanguageNotFoundError:
+        logger.warning(f"{lang_lower} is not a valid standard language code.")
+        return None

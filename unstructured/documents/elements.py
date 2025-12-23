@@ -318,8 +318,10 @@ class ElementMetadata:
     def __setattr__(self, __name: str, __value: Any) -> None:
         if __value is None:
             # -- can't use `hasattr()` for this because it calls `__getattr__()` to find out --
-            if __name in self.__dict__:
-                delattr(self, __name)
+            try:
+                del self.__dict__[__name]
+            except KeyError:
+                pass
             return
         if not UNSTRUCTURED_INCLUDE_DEBUG_METADATA and __name in self.DEBUG_FIELD_NAMES:
             return
@@ -1035,6 +1037,8 @@ def _kvform_rehydrate_internal_elements(kv_pairs: list[dict[str, Any]]) -> list[
     e.g. when partition_json is used.
     """
     from unstructured.staging.base import elements_from_dicts
+
+    Points: TypeAlias = "tuple[Point, ...]"
 
     # safe to overwrite - deepcopy already happened
     for kv_pair in kv_pairs:

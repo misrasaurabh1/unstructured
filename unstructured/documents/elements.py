@@ -254,50 +254,49 @@ class ElementMetadata:
         text_as_html: Optional[str] = None,
         url: Optional[str] = None,
     ) -> None:
-        self.attached_to_filename = attached_to_filename
-        self.bcc_recipient = bcc_recipient
-        self.category_depth = category_depth
-        self.cc_recipient = cc_recipient
-        self.coordinates = coordinates
-        self.data_source = data_source
-        self.detection_class_prob = detection_class_prob
-        self.emphasized_text_contents = emphasized_text_contents
-        self.emphasized_text_tags = emphasized_text_tags
+        # Use __dict__ assignment to bypass the custom __setattr__, reducing attribute setting overhead
+        dct = self.__dict__
+        dct["attached_to_filename"] = attached_to_filename
+        dct["bcc_recipient"] = bcc_recipient
+        dct["category_depth"] = category_depth
+        dct["cc_recipient"] = cc_recipient
+        dct["coordinates"] = coordinates
+        dct["data_source"] = data_source
+        dct["detection_class_prob"] = detection_class_prob
+        dct["emphasized_text_contents"] = emphasized_text_contents
+        dct["emphasized_text_tags"] = emphasized_text_tags
 
         # -- accommodate pathlib.Path for filename --
-        filename = str(filename) if isinstance(filename, pathlib.Path) else filename
-        # -- produces "", "" when filename arg is None --
-        directory_path, file_name = os.path.split(filename or "")
-        # -- prefer `file_directory` arg if specified, otherwise split of file-path passed as
-        # -- `filename` arg, or None if `filename` is the empty string.
-        self.file_directory = file_directory or directory_path or None
-        self.filename = file_name or None
+        _filename = str(filename) if isinstance(filename, pathlib.Path) else filename
+        directory_path, file_name = os.path.split(_filename or "")
+        dct["file_directory"] = file_directory or directory_path or None
+        dct["filename"] = file_name or None
 
-        self.filetype = filetype
-        self.header_footer_type = header_footer_type
-        self.image_base64 = image_base64
-        self.image_mime_type = image_mime_type
-        self.image_url = image_url
-        self.image_path = image_path
-        self.is_continuation = is_continuation
-        self.languages = languages
-        self.last_modified = last_modified
-        self.link_texts = link_texts
-        self.link_urls = link_urls
-        self.link_start_indexes = link_start_indexes
-        self.links = links
-        self.email_message_id = email_message_id
-        self.orig_elements = orig_elements
-        self.page_name = page_name
-        self.page_number = page_number
-        self.parent_id = parent_id
-        self.sent_from = sent_from
-        self.sent_to = sent_to
-        self.signature = signature
-        self.subject = subject
-        self.text_as_html = text_as_html
-        self.table_as_cells = table_as_cells
-        self.url = url
+        dct["filetype"] = filetype
+        dct["header_footer_type"] = header_footer_type
+        dct["image_base64"] = image_base64
+        dct["image_mime_type"] = image_mime_type
+        dct["image_url"] = image_url
+        dct["image_path"] = image_path
+        dct["is_continuation"] = is_continuation
+        dct["languages"] = languages
+        dct["last_modified"] = last_modified
+        dct["link_texts"] = link_texts
+        dct["link_urls"] = link_urls
+        dct["link_start_indexes"] = link_start_indexes
+        dct["links"] = links
+        dct["email_message_id"] = email_message_id
+        dct["orig_elements"] = orig_elements
+        dct["page_name"] = page_name
+        dct["page_number"] = page_number
+        dct["parent_id"] = parent_id
+        dct["sent_from"] = sent_from
+        dct["sent_to"] = sent_to
+        dct["signature"] = signature
+        dct["subject"] = subject
+        dct["text_as_html"] = text_as_html
+        dct["table_as_cells"] = table_as_cells
+        dct["url"] = url
 
     def __eq__(self, other: object) -> bool:
         """Implments equivalence, like meta == other_meta.
@@ -317,12 +316,18 @@ class ElementMetadata:
 
     def __setattr__(self, __name: str, __value: Any) -> None:
         if __value is None:
-            # -- can't use `hasattr()` for this because it calls `__getattr__()` to find out --
-            if __name in self.__dict__:
-                delattr(self, __name)
+            dct = self.__dict__
+            if __name in dct:
+                # Directly use del self.__dict__[name] for speed (avoids Python-level descriptor logic)
+                del dct[__name]
             return
-        if not UNSTRUCTURED_INCLUDE_DEBUG_METADATA and __name in self.DEBUG_FIELD_NAMES:
-            return
+        # Move DEBUG_FIELD_NAMES lookup out of "not UNSTRUCTURED_INCLUDE_DEBUG_METADATA" for code clarity
+        # Cache DEBUG_FIELD_NAMES in a local var to avoid repeated lookups
+        if not UNSTRUCTURED_INCLUDE_DEBUG_METADATA:
+            debug_fields = type(self).DEBUG_FIELD_NAMES
+            if __name in debug_fields:
+                return
+        # Use super().__setattr__ only for the valid set; it's needed for property/slots compatibility
         super().__setattr__(__name, __value)
 
     @classmethod
@@ -1035,6 +1040,8 @@ def _kvform_rehydrate_internal_elements(kv_pairs: list[dict[str, Any]]) -> list[
     e.g. when partition_json is used.
     """
     from unstructured.staging.base import elements_from_dicts
+
+    Points: TypeAlias = "tuple[Point, ...]"
 
     # safe to overwrite - deepcopy already happened
     for kv_pair in kv_pairs:

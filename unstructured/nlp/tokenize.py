@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Final, List, Tuple
 
 import nltk
-from nltk import pos_tag as _pos_tag
+from nltk import pos_tag_sents as _pos_tag_sents
 from nltk import sent_tokenize as _sent_tokenize
 from nltk import word_tokenize as _word_tokenize
 
@@ -64,8 +64,10 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
     """A wrapper around the NLTK POS tagger with LRU caching enabled."""
     # Splitting into sentences before tokenizing.
     sentences = _sent_tokenize(text)
-    parts_of_speech: list[tuple[str, str]] = []
-    for sentence in sentences:
-        tokens = _word_tokenize(sentence)
-        parts_of_speech.extend(_pos_tag(tokens))
+    # Tokenize all sentences first
+    tokenized_sentences = [_word_tokenize(sentence) for sentence in sentences]
+    # Perform POS tagging on all sentences in a batch
+    pos_tagged_sentences = _pos_tag_sents(tokenized_sentences)
+    # Flatten the list of lists into a single list
+    parts_of_speech = [pair for sentence in pos_tagged_sentences for pair in sentence]
     return parts_of_speech

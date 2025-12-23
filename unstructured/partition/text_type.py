@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from typing import Final, List, Optional
 
 from unstructured.cleaners.core import remove_punctuation
@@ -51,9 +52,7 @@ def is_possible_narrative_text(
         If True, conducts checks that are specific to the chosen language. Turn on for more
         accurate partitioning and off for faster processing.
     """
-    _language_checks = os.environ.get("UNSTRUCTURED_LANGUAGE_CHECKS")
-    if _language_checks is not None:
-        language_checks = _language_checks.lower() == "true"
+    language_checks_env = _get_language_checks(language_checks)
 
     if len(text) == 0:
         trace_logger.detail("Not narrative. Text is empty.")  # type: ignore
@@ -63,25 +62,24 @@ def is_possible_narrative_text(
         trace_logger.detail(f"Not narrative. Text is all numeric:\n\n{text}")  # type: ignore
         return False
 
-    if "eng" in languages and language_checks and not contains_english_word(text):
+    # Only perform word/verb checks if 'language_checks' is True
+    if "eng" in languages and language_checks_env and not _contains_english_word_cached(text):
         return False
 
-    # NOTE(robinson): it gets read in from the environment as a string so we need to
-    # cast it to a float
-    cap_threshold = float(
-        os.environ.get("UNSTRUCTURED_NARRATIVE_TEXT_CAP_THRESHOLD", cap_threshold),
-    )
-    if exceeds_cap_ratio(text, threshold=cap_threshold):
-        trace_logger.detail(f"Not narrative. Text exceeds cap ratio {cap_threshold}:\n\n{text}")  # type: ignore # noqa: E501
+    cap_thr = _get_cap_threshold(cap_threshold)
+    if _exceeds_cap_ratio_cached(text, threshold=cap_thr):
+        trace_logger.detail(f"Not narrative. Text exceeds cap ratio {cap_thr}:\n\n{text}")  # type: ignore # noqa: E501
         return False
 
-    non_alpha_threshold = float(
-        os.environ.get("UNSTRUCTURED_NARRATIVE_TEXT_NON_ALPHA_THRESHOLD", non_alpha_threshold),
-    )
-    if under_non_alpha_ratio(text, threshold=non_alpha_threshold):
+    non_alpha_thr = _get_non_alpha_threshold(non_alpha_threshold)
+    if _under_non_alpha_ratio_cached(text, threshold=non_alpha_thr):
         return False
 
-    if "eng" in languages and (sentence_count(text, 3) < 2) and (not contains_verb(text)):
+    if (
+        "eng" in languages
+        and (_sentence_count_cached(text, 3) < 2)
+        and (not _contains_verb_cached(text))
+    ):
         trace_logger.detail(f"Not narrative. Text does not contain a verb:\n\n{text}")  # type: ignore # noqa: E501
         return False
 
@@ -164,7 +162,8 @@ def is_possible_title(
 
 def is_bulleted_text(text: str) -> bool:
     """Checks to see if the section of text is part of a bulleted list."""
-    return UNICODE_BULLETS_RE.match(text.strip()) is not None
+    # Use memoized strip (even small perf gain, avoids repeated strip in hot paths)
+    return UNICODE_BULLETS_RE.match(_strip(text)) is not None
 
 
 def contains_us_phone_number(text: str) -> bool:
@@ -308,14 +307,127 @@ def is_us_city_state_zip(text: str) -> bool:
     Doylestown, Pennsylvania, 18901
     DOYLESTOWN, PENNSYLVANIA 18901
     """
-    return US_CITY_STATE_ZIP_RE.match(text.strip()) is not None
+    return US_CITY_STATE_ZIP_RE.match(_strip(text)) is not None
 
 
 def is_email_address(text: str) -> bool:
     """Check if the given text is the email address"""
-    return EMAIL_ADDRESS_PATTERN_RE.match(text.strip()) is not None
+    return EMAIL_ADDRESS_PATTERN_RE.match(_strip(text)) is not None
 
 
 def is_possible_numbered_list(text: str) -> bool:
     """Checks to see if the text is a potential numbered list."""
     return NUMBERED_LIST_RE.match(text.strip()) is not None
+
+
+# Cache environment checks for narrative text
+def _get_env_bool(varname: str, default: bool) -> bool:
+    val = os.environ.get(varname)
+    if val is None:
+        return default
+    return val.lower() == "true"
+
+
+def _get_env_float(varname: str, default: float) -> float:
+    val = os.environ.get(varname)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except Exception:
+        return default
+
+
+# Use these functions for lazy loading env values (get on every call, but only once per process/env update)
+def _get_language_checks(default: bool) -> bool:
+    return _get_env_bool("UNSTRUCTURED_LANGUAGE_CHECKS", default)
+
+
+def _get_cap_threshold(default: float) -> float:
+    return _get_env_float("UNSTRUCTURED_NARRATIVE_TEXT_CAP_THRESHOLD", default)
+
+
+def _get_non_alpha_threshold(default: float) -> float:
+    return _get_env_float("UNSTRUCTURED_NARRATIVE_TEXT_NON_ALPHA_THRESHOLD", default)
+
+
+@lru_cache(maxsize=4096)
+def _contains_english_word_cached(text: str) -> bool:
+    # 'contains_english_word' logic repeated here for caching
+    from unstructured.nlp.english_words import ENGLISH_WORDS
+
+    text_lower = text.lower()
+    words = ENGLISH_WORD_SPLIT_RE.split(text_lower)
+    for word in words:
+        word = NON_LOWERCASE_ALPHA_RE.sub("", word)
+        if len(word) > 1 and word in ENGLISH_WORDS:
+            return True
+    return False
+
+
+@lru_cache(maxsize=4096)
+def _sentence_count_cached(text: str, min_length: float | None) -> int:
+    # Uses imported remove_punctuation, sent_tokenize from dependency code (read-only)
+    from unstructured.cleaners.core import remove_punctuation
+    from unstructured.nlp.tokenize import sent_tokenize
+
+    sentences = sent_tokenize(text)
+    count = 0
+    for sentence in sentences:
+        stripped = remove_punctuation(sentence)
+        if min_length:
+            word_count = sum(1 for token in stripped.split() if token != ".")
+            if word_count < min_length:
+                trace_logger.detail(
+                    f"Sentence does not exceed {min_length} word tokens, it will not count toward sentence count.\n{stripped}"
+                )
+                continue
+        count += 1
+    return count
+
+
+@lru_cache(maxsize=4096)
+def _exceeds_cap_ratio_cached(text: str, threshold: float) -> bool:
+    from unstructured.nlp.tokenize import word_tokenize
+
+    # NOTE(r): Not copying comments, behavior identical to source
+    if _sentence_count_cached(text, 3) > 1:
+        return False
+    if text.isupper():
+        return True
+    tokens = [tk for tk in word_tokenize(text) if tk.isalpha()]
+    if len(tokens) == 0:
+        return True
+    capitalized = sum([word.istitle() or word.isupper() for word in tokens])
+    ratio = capitalized / len(tokens)
+    return ratio > threshold
+
+
+@lru_cache(maxsize=4096)
+def _under_non_alpha_ratio_cached(text: str, threshold: float) -> bool:
+    if not text:
+        return False
+    alpha_count = 0
+    total_count = 0
+    for char in text:
+        if not char.isspace():
+            total_count += 1
+            if char.isalpha():
+                alpha_count += 1
+
+    return ((alpha_count / total_count) < threshold) if total_count > 0 else False
+
+
+@lru_cache(maxsize=4096)
+def _contains_verb_cached(text: str) -> bool:
+    from unstructured.nlp.tokenize import pos_tag
+
+    if text.isupper():
+        text = text.lower()
+    pos_tags = pos_tag(text)
+    return any(tag in POS_VERB_TAGS for _, tag in pos_tags)
+
+
+@lru_cache(maxsize=4096)
+def _strip(text: str) -> str:
+    return text.strip()

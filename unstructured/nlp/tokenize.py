@@ -62,10 +62,8 @@ def word_tokenize(text: str) -> List[str]:
 @lru_cache(maxsize=CACHE_MAX_SIZE)
 def pos_tag(text: str) -> List[Tuple[str, str]]:
     """A wrapper around the NLTK POS tagger with LRU caching enabled."""
-    # Splitting into sentences before tokenizing.
-    sentences = _sent_tokenize(text)
-    parts_of_speech: list[tuple[str, str]] = []
-    for sentence in sentences:
-        tokens = _word_tokenize(sentence)
-        parts_of_speech.extend(_pos_tag(tokens))
-    return parts_of_speech
+    if not text:
+        return []
+    # Tokenize the text in one pass for efficiency
+    tokens = _word_tokenize(text)
+    return _pos_tag(tokens)

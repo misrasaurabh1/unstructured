@@ -222,7 +222,8 @@ def sentence_count(text: str, min_length: Optional[int] = None) -> int:
         stripped = remove_punctuation(sentence)
         # Fast token count after punctuation is removed: just split on whitespace
         if min_length:
-            word_count = sum(1 for token in stripped.split() if token != ".")
+            tokens = stripped.split()
+            word_count = len(tokens)
             if word_count < min_length:
                 trace_logger.detail(  # type: ignore
                     f"Sentence does not exceed {min_length} word tokens, it will not count toward "

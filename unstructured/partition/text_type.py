@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from typing import Final, List, Optional
 
 from unstructured.cleaners.core import remove_punctuation
@@ -216,6 +217,8 @@ def sentence_count(text: str, min_length: Optional[int] = None) -> int:
     min_length
         The min number of words a section needs to be for it to be considered a sentence.
     """
+    if min_length == 3:
+        return _sentence_count_memo(text, 3)
     sentences = sent_tokenize(text)
     count = 0
     for sentence in sentences:
@@ -319,3 +322,23 @@ def is_email_address(text: str) -> bool:
 def is_possible_numbered_list(text: str) -> bool:
     """Checks to see if the text is a potential numbered list."""
     return NUMBERED_LIST_RE.match(text.strip()) is not None
+
+
+@lru_cache(maxsize=256)
+def _sentence_count_memo(text: str, min_length: int) -> int:
+    """Memoized sentence count for hot path (min_length=3)."""
+    sentences = sent_tokenize(text)
+    count = 0
+    for sentence in sentences:
+        stripped = remove_punctuation(sentence)
+        if min_length:
+            word_count = sum(1 for token in stripped.split() if token != ".")
+            if word_count < min_length:
+                trace_logger.detail(  # type: ignore
+                    f"Sentence does not exceed {min_length} word tokens, it will not count toward "
+                    "sentence count.\n"
+                    f"{stripped}",
+                )
+                continue
+        count += 1
+    return count

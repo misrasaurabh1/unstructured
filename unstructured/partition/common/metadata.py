@@ -70,42 +70,41 @@ def set_element_hierarchy(
     category_depth is only relevant when elements are of the same category.
     """
     stack: list[Element] = []
+    # For consistently used ruleset lookups
+    ruleset_get = ruleset.get
+
     for element in elements:
         if element.metadata.parent_id is not None:
             continue
-        parent_id = None
         element_category = getattr(element, "category", None)
-        element_category_depth = getattr(element.metadata, "category_depth", 0) or 0
 
         # -- skip elements without a category --
         if not element_category:
             continue
 
-        while stack:
-            top_element: Element = stack[-1]
-            top_element_category = getattr(top_element, "category")
-            top_element_category_depth = (
-                getattr(
-                    top_element.metadata,
-                    "category_depth",
-                    0,
-                )
-                or 0
-            )
+        # Avoids repeated getattr calls
+        metadata = element.metadata
+        element_category_depth = getattr(metadata, "category_depth", 0) or 0
 
-            if (
-                top_element_category == element_category
-                and top_element_category_depth < element_category_depth
-            ) or (
-                top_element_category != element_category
-                and element_category in ruleset.get(top_element_category, [])
-            ):
+        parent_id = None
+
+        while stack:
+            top_element = stack[-1]
+            top_metadata = top_element.metadata
+            top_element_category = getattr(top_element, "category")
+            top_element_category_depth = getattr(top_metadata, "category_depth", 0) or 0
+
+            if top_element_category == element_category:
+                if top_element_category_depth < element_category_depth:
+                    parent_id = top_element.id
+                    break
+            elif element_category in ruleset_get(top_element_category, ()):
                 parent_id = top_element.id
                 break
 
             stack.pop()
 
-        element.metadata.parent_id = parent_id
+        metadata.parent_id = parent_id
         stack.append(element)
 
     return list(elements)

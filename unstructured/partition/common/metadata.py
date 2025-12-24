@@ -26,11 +26,14 @@ def get_last_modified_date(filename: str) -> str | None:
     Otherwise returns date and time in ISO 8601 string format (YYYY-MM-DDTHH:MM:SS) like
     "2024-03-05T17:02:53".
     """
-    if not os.path.isfile(filename):
+    try:
+        st = os.stat(filename)
+        if not (st.st_mode & 0o170000) == 0o100000:  # regular file type
+            return None
+        modify_date = dt.datetime.fromtimestamp(st.st_mtime)
+        return modify_date.strftime("%Y-%m-%dT%H:%M:%S%z")
+    except (OSError, ValueError):
         return None
-
-    modify_date = dt.datetime.fromtimestamp(os.path.getmtime(filename))
-    return modify_date.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
 HIERARCHY_RULE_SET = {

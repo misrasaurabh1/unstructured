@@ -9,7 +9,6 @@ import hashlib
 import os
 import pathlib
 import uuid
-from itertools import groupby
 from types import MappingProxyType
 from typing import Any, Callable, FrozenSet, Optional, Sequence, cast
 
@@ -541,9 +540,16 @@ def assign_and_map_hash_ids(elements: list[Element]) -> list[Element]:
     """
     # -- generate sequence number for each element on a page --
     page_numbers = [e.metadata.page_number for e in elements]
-    page_seq_pairs = [
-        seq_on_page for _, group in groupby(page_numbers) for seq_on_page, _ in enumerate(group)
-    ]
+    page_seq_pairs = [0] * len(page_numbers)
+    if page_numbers:
+        prev_pg = page_numbers[0]
+        counter = 0
+        for idx, pg in enumerate(page_numbers):
+            if idx > 0 and pg != prev_pg:
+                counter = 0
+                prev_pg = pg
+            page_seq_pairs[idx] = counter
+            counter += 1
 
     # -- assign hash IDs to elements --
     old_to_new_mapping = {
@@ -681,7 +687,7 @@ class Element(abc.ABC):
         element_id: Optional[str] = None,
         coordinates: Optional[tuple[tuple[float, float], ...]] = None,
         coordinate_system: Optional[CoordinateSystem] = None,
-        metadata: Optional[ElementMetadata] = None,
+        metadata: Optional["ElementMetadata"] = None,
         detection_origin: Optional[str] = None,
     ):
         if element_id is not None and not isinstance(element_id, str):  # type: ignore
@@ -1035,6 +1041,8 @@ def _kvform_rehydrate_internal_elements(kv_pairs: list[dict[str, Any]]) -> list[
     e.g. when partition_json is used.
     """
     from unstructured.staging.base import elements_from_dicts
+
+    Points: TypeAlias = "tuple[Point, ...]"
 
     # safe to overwrite - deepcopy already happened
     for kv_pair in kv_pairs:

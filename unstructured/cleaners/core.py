@@ -21,6 +21,18 @@ from unstructured.nlp.patterns import (
     UNICODE_BULLETS_RE_0W,
 )
 
+_paragraph_pattern_re = (
+    PARAGRAPH_PATTERN
+    if isinstance(PARAGRAPH_PATTERN, re.Pattern)
+    else re.compile(PARAGRAPH_PATTERN)
+)
+
+_e_bullet_pattern = E_BULLET_PATTERN
+
+_unicode_bullets_re = UNICODE_BULLETS_RE
+
+_unicode_bullets_re_0w = UNICODE_BULLETS_RE_0W
+
 
 def clean_non_ascii_chars(text) -> str:
     """Cleans non-ascii characters from unicode string.
@@ -119,18 +131,15 @@ def group_bullet_paragraph(paragraph: str) -> list:
     '''○ The big red fox is walking down the lane.
     ○ At the end of the land the fox met a bear.'''
     """
-    paragraph_pattern_re = re.compile(PARAGRAPH_PATTERN)
-
+    # Reuse precompiled regex
     # pytesseract converts some bullet points to standalone "e" characters.
     # Substitute "e" with bullets since they are later used in partition_text
     # to determine list element type.
-    paragraph = E_BULLET_PATTERN.sub("·", paragraph).strip()
+    paragraph = _e_bullet_pattern.sub("·", paragraph).strip()
 
-    bullet_paras = UNICODE_BULLETS_RE_0W.split(paragraph)
-    clean_paragraphs = []
-    for bullet in bullet_paras:
-        if bullet:
-            clean_paragraphs.append(paragraph_pattern_re.sub(" ", bullet))
+    bullet_paras = _unicode_bullets_re_0w.split(paragraph)
+    # Use list comprehension for fast and concise cleaning
+    clean_paragraphs = [_paragraph_pattern_re.sub(" ", bullet) for bullet in bullet_paras if bullet]
     return clean_paragraphs
 
 
@@ -153,11 +162,6 @@ def group_broken_paragraphs(
     '''The big red fox is walking down the lane.
     At the end of the land the fox met a bear.'''
     """
-    paragraph_pattern_re = (
-        PARAGRAPH_PATTERN
-        if isinstance(PARAGRAPH_PATTERN, re.Pattern)
-        else re.compile(PARAGRAPH_PATTERN)
-    )
 
     paragraphs = paragraph_split.split(text)
     clean_paragraphs = []
@@ -166,7 +170,7 @@ def group_broken_paragraphs(
         if not stripped_par:
             continue
 
-        if UNICODE_BULLETS_RE.match(stripped_par) or E_BULLET_PATTERN.match(stripped_par):
+        if _unicode_bullets_re.match(stripped_par) or _e_bullet_pattern.match(stripped_par):
             clean_paragraphs.extend(group_bullet_paragraph(paragraph))
             continue
         # NOTE(robinson) - This block is to account for lines like the following that shouldn't be
@@ -175,11 +179,16 @@ def group_broken_paragraphs(
         #     Version 2.0, January 2004
         #     http://www.apache.org/licenses/
         para_split = line_split.split(paragraph)
-        all_lines_short = all(len(line.strip().split(" ")) < 5 for line in para_split)
+        # Use generator to avoid building unnecessary lists
+        all_lines_short = True
+        for line in para_split:
+            if len(line.strip().split(" ")) >= 5:
+                all_lines_short = False
+                break
         if all_lines_short:
             clean_paragraphs.extend(line for line in para_split if line.strip())
         else:
-            clean_paragraphs.append(paragraph_pattern_re.sub(" ", paragraph))
+            clean_paragraphs.append(_paragraph_pattern_re.sub(" ", paragraph))
 
     return "\n\n".join(clean_paragraphs)
 

@@ -64,8 +64,8 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
     """A wrapper around the NLTK POS tagger with LRU caching enabled."""
     # Splitting into sentences before tokenizing.
     sentences = _sent_tokenize(text)
-    parts_of_speech: list[tuple[str, str]] = []
-    for sentence in sentences:
-        tokens = _word_tokenize(sentence)
-        parts_of_speech.extend(_pos_tag(tokens))
+    # Use list comprehension for tokens and POS tags aggregation
+    parts_of_speech: list[tuple[str, str]] = [
+        pair for sentence in sentences for pair in _pos_tag(_word_tokenize(sentence))
+    ]
     return parts_of_speech

@@ -4,6 +4,7 @@ import quopri
 import re
 import sys
 import unicodedata
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import numpy as np
@@ -41,12 +42,10 @@ def clean_bullets(text: str) -> str:
     -------
     ●  This is an excellent point! -> This is an excellent point!
     """
-    search = UNICODE_BULLETS_RE.match(text)
-    if search is None:
+    # Fast path for empty string (avoids regex call overhead)
+    if not text:
         return text
-
-    cleaned_text = UNICODE_BULLETS_RE.sub("", text, 1)
-    return cleaned_text.strip()
+    return _clean_bullets_impl(text)
 
 
 def clean_ordered_bullets(text) -> str:
@@ -479,3 +478,15 @@ def clean_extra_whitespace_with_index_run(text: str) -> Tuple[str, np.ndarray]:
 
 def index_adjustment_after_clean_extra_whitespace(index, moved_indices) -> int:
     return int(index - moved_indices[index])
+
+
+# Memoize the compiled pattern's match and sub for faster repeated calls with the same text
+@lru_cache(maxsize=1024)
+def _clean_bullets_impl(text: str) -> str:
+    # The function logic is unchanged, but is now cached for repeated text
+    search = UNICODE_BULLETS_RE.match(text)
+    if search is None:
+        return text
+
+    cleaned_text = UNICODE_BULLETS_RE.sub("", text, 1)
+    return cleaned_text.strip()

@@ -516,9 +516,10 @@ def _clean_ocr_languages_arg(ocr_languages: list[str] | str) -> str:
     if isinstance(ocr_languages, list):
         ocr_languages = "+".join(ocr_languages)
 
-    # remove extra quotations
-    ocr_languages = re.sub(r"[\"']", "", ocr_languages)
-    # remove brackets
-    ocr_languages = re.sub(r"[\[\]]", "", ocr_languages)
+    # Remove extra quotations and brackets without using re.sub
+    # This is significantly faster for simple character replacements/removal
+    ocr_languages = (
+        ocr_languages.replace('"', "").replace("'", "").replace("[", "").replace("]", "")
+    )
 
     return ocr_languages

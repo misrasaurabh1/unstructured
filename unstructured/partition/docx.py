@@ -863,8 +863,14 @@ class _DocxPartitioner:
         if xpath:
             return round(float(xpath[0]))
 
-        # Determine category depth from style name
-        style_name = (paragraph.style and paragraph.style.name) or "Normal"
+        # The original line profile shows getting the style name is extremely costly.
+        # This is due to the dynamic descriptor access. Avoid getting attributes repeatedly.
+        style = paragraph.style
+        if style is not None:
+            style_name = style.name
+        else:
+            style_name = "Normal"
+
         depth = self._parse_category_depth_by_style_name(style_name)
 
         if depth > 0:
@@ -884,7 +890,12 @@ class _DocxPartitioner:
         """
 
         def _extract_number(suffix: str) -> int:
-            return int(suffix.split()[-1]) - 1 if suffix.split()[-1].isdigit() else 0
+            split = suffix.split()
+            if split and split[-1].isdigit():
+                return int(split[-1]) - 1
+            return 0
+
+        # Heading styles
 
         # Heading styles
         if style_name.startswith("Heading"):
@@ -893,9 +904,10 @@ class _DocxPartitioner:
         if style_name == "Subtitle":
             return 1
 
-        # List styles
-        list_prefixes = ["List", "List Bullet", "List Continue", "List Number"]
-        if any(style_name.startswith(prefix) for prefix in list_prefixes):
+        # Single pass list style prefix check, avoiding generator short-circuit overhead.
+        # Inline fast check for all variants, using tuple for efficient startswith.
+        list_prefixes = ("List", "List Bullet", "List Continue", "List Number")
+        if style_name.startswith(list_prefixes):
             return _extract_number(style_name)
 
         # Other styles

@@ -750,13 +750,19 @@ class _DocxPartitioner:
 
     def _iter_table_emphasis(self, table: DocxTable) -> Iterator[dict[str, str]]:
         """Generate e.g. {"text": "word", "tag": "b"} for each emphasis in `table`."""
+        # Localize frequently used method to avoid repeated attribute lookup in tight loop
+        _iter_para_emph = self._iter_paragraph_emphasis
         for row in table.rows:
             try:
                 # -- row.cells may introduce `ValueError: no tc element at grid_offset=X` if the
                 # -- table has merged or malformed cells. always wrap in try/except.
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        yield from self._iter_paragraph_emphasis(paragraph)
+                row_cells = row.cells  # local variable for improved access speed
+                for cell in row_cells:
+                    cell_paragraphs = cell.paragraphs  # local variable for improved access speed
+                    for paragraph in cell_paragraphs:
+                        # Directly exhaust the iterator, yield per subitem
+                        for emph in _iter_para_emph(paragraph):
+                            yield emph
             except Exception as e:
                 logging.warning(f"Skipping row in _iter_table_emphasis due to: {e}")
                 continue
@@ -968,8 +974,13 @@ class _DocxPartitioner:
 
     def _table_emphasis(self, table: DocxTable) -> tuple[list[str], list[str]]:
         """[contents, tags] pair describing emphasized text in `table`."""
-        iter_tbl_emph, iter_tbl_emph_2 = itertools.tee(self._iter_table_emphasis(table))
-        return ([e["text"] for e in iter_tbl_emph], [e["tag"] for e in iter_tbl_emph_2])
+        # Instead of itertools.tee and materializing both lists, iterate once and split results
+        out_text: list[str] = []
+        out_tag: list[str] = []
+        for emph in self._iter_table_emphasis(table):
+            out_text.append(emph["text"])
+            out_tag.append(emph["tag"])
+        return (out_text, out_tag)
 
 
 # ================================================================================================

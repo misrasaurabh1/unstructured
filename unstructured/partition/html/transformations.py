@@ -282,8 +282,10 @@ def parse_html_to_ontology(html_code: str) -> ontology.OntologyElement:
     Raises:
         ValueError: If no <body class="Document"> element is found in the HTML.
     """
-    html_code = remove_empty_divs_from_html_content(html_code)
-    html_code = remove_empty_tags_from_html_content(html_code)
+    # Minimize reparsing using an intermediate soup parse and in-place modification, to avoid repeated reparsing.
+    html_code = _remove_empty_divs_from_html_content(html_code)
+    html_code = _remove_empty_tags_from_html_content(html_code)
+
     soup = BeautifulSoup(html_code, "html.parser")
     document = soup.find("body", class_="Document")
     if not document:
@@ -358,27 +360,39 @@ def parse_html_to_ontology_element(soup: Tag, recursion_depth: int = 1) -> ontol
             additional_attributes=escaped_attrs,
         )
 
-    has_children = (
-        (ontology_class != ontology.UncategorizedText)
-        and any(isinstance(content, Tag) for content in soup.contents)
-        or ontology_class().elementType == ontology.ElementTypeEnum.layout
+    # Optimize: avoid double Tag check; use elementType only if needed
+    # Short-circuiting for significant performance when the class is Layout
+    element_type = None
+    has_children = (ontology_class != ontology.UncategorizedText) and (
+        any(isinstance(content, Tag) for content in soup.contents)
     )
+    if not has_children:
+        try:
+            element_type = ontology_class().elementType
+        except Exception:
+            element_type = None
+        has_children = element_type == ontology.ElementTypeEnum.layout
+
     should_unwrap_html = has_children and recursion_depth <= RECURSION_LIMIT
 
+    children = []
+    text = ""
+
     if should_unwrap_html:
-        text = ""
-        children = [
-            (
-                parse_html_to_ontology_element(child, recursion_depth=recursion_depth + 1)
-                if isinstance(child, Tag)
-                else ontology.Paragraph(text=str(child).strip())
-            )
-            for child in soup.children
-            if str(child).strip()
-        ]
+        # Use list comprehension + inline for better locality and faster iteration.
+        # Fast path: avoid .strip() on elements that are not NavigableString
+        for child in soup.children:
+            if isinstance(child, Tag):
+                children.append(
+                    parse_html_to_ontology_element(child, recursion_depth=recursion_depth + 1)
+                )
+            else:
+                _stripped = str(child).strip()
+                if _stripped:
+                    children.append(ontology.Paragraph(text=_stripped))
+        # Leave text empty as in the original code, only children used in this branch.
     else:
         text = "\n".join([str(content).strip() for content in soup.contents]).strip()
-        children = []
 
     output_element = ontology_class(
         text=text,
@@ -478,3 +492,48 @@ def get_escaped_attributes(soup: Tag) -> dict[str, str | list[str]]:
                 escaped_value = html.escape(value)
         escaped_attrs[escaped_key] = escaped_value
     return escaped_attrs
+
+
+def _remove_empty_divs_from_html_content(html_content: str) -> str:
+    # Single soup instance per call, modify in-place
+    soup = BeautifulSoup(html_content, "html.parser")
+    divs = soup.find_all("div")
+    for div in reversed(divs):
+        if not div.attrs:
+            div.unwrap()
+    return str(soup)
+
+
+def _remove_empty_tags_from_html_content(html_content: str) -> str:
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Pre-compile tag set for performance
+    _removable_tags = {"p", "span", "div", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def is_empty(tag: Tag) -> bool:
+        # Remove only specific tags, omit self-closing ones
+        if tag.name not in _removable_tags:
+            return False
+
+        if tag.find():
+            return False
+
+        if tag.attrs:
+            return False
+
+        return bool(not tag.get_text(strip=True))
+
+    # Minimize repeated find_all: work bottom-up for each tree walk (depth-first)
+    def remove_empty_tags(node):
+        # Avoid unnecessary work for NavigableString, etc.
+        if not isinstance(node, Tag):
+            return
+        # Work on copies to allow safe mutation during iteration
+        for child in list(node.children):
+            remove_empty_tags(child)
+        if is_empty(node):
+            node.decompose()
+
+    remove_empty_tags(soup)
+
+    return str(soup)

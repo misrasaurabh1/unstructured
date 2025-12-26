@@ -310,20 +310,24 @@ def remove_empty_divs_from_html_content(html_content: str) -> str:
 def remove_empty_tags_from_html_content(html_content: str) -> str:
     soup = BeautifulSoup(html_content, "html.parser")
 
-    def is_empty(tag):
+    specific_tags = {"p", "span", "div", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def is_empty(tag: Tag) -> bool:
         # Remove only specific tags, omit self-closing ones
-        if tag.name not in ["p", "span", "div", "h1", "h2", "h3", "h4", "h5", "h6"]:
+        if tag.name not in specific_tags:
             return False
 
-        if tag.find():
+        # Any child tag
+        if any(isinstance(child, Tag) for child in tag.contents):
             return False
 
         if tag.attrs:
             return False
 
-        return bool(not tag.get_text(strip=True))
+        # No non-whitespace text
+        return not tag.get_text(strip=True)
 
-    def remove_empty_tags(soup):
+    def remove_empty_tags(soup: BeautifulSoup) -> None:
         for tag in soup.find_all():
             if is_empty(tag):
                 tag.decompose()

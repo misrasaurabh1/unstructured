@@ -653,9 +653,12 @@ class ElementType:
             dict: A dictionary where keys are attribute names and values are attribute values.
         """
         return {
-            attr: getattr(cls, attr)
-            for attr in dir(cls)
-            if not callable(getattr(cls, attr)) and not attr.startswith("__")
+            attr: value
+            for attr, value in cls.__dict__.items()
+            if not attr.startswith("__")
+            and not (
+                callable(value) or isinstance(value, classmethod) or isinstance(value, staticmethod)
+            )
         }
 
 

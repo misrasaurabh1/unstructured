@@ -70,42 +70,50 @@ def set_element_hierarchy(
     category_depth is only relevant when elements are of the same category.
     """
     stack: list[Element] = []
+    ruleset_get = ruleset.get  # Cache method lookup
     for element in elements:
-        if element.metadata.parent_id is not None:
+        metadata = element.metadata
+        if metadata.parent_id is not None:
             continue
-        parent_id = None
-        element_category = getattr(element, "category", None)
-        element_category_depth = getattr(element.metadata, "category_depth", 0) or 0
 
         # -- skip elements without a category --
+        # access 'category' directly for speed (assuming public .category on element)
+        try:
+            element_category = element.category
+        except AttributeError:
+            element_category = getattr(element, "category", None)
         if not element_category:
             continue
 
+        # access 'category_depth' directly for speed (assuming public .category_depth on metadata)
+        element_category_depth = getattr(metadata, "category_depth", 0) or 0
+
+        parent_id = None
+
         while stack:
-            top_element: Element = stack[-1]
-            top_element_category = getattr(top_element, "category")
-            top_element_category_depth = (
-                getattr(
-                    top_element.metadata,
-                    "category_depth",
-                    0,
-                )
-                or 0
-            )
+            top_element = stack[-1]
+            top_metadata = top_element.metadata
+            try:
+                top_category = top_element.category
+            except AttributeError:
+                top_category = getattr(top_element, "category", None)
+            if top_category is None:
+                stack.pop()
+                continue
+            top_category_depth = getattr(top_metadata, "category_depth", 0) or 0
 
             if (
-                top_element_category == element_category
-                and top_element_category_depth < element_category_depth
+                top_category == element_category and top_category_depth < element_category_depth
             ) or (
-                top_element_category != element_category
-                and element_category in ruleset.get(top_element_category, [])
+                top_category != element_category
+                and element_category in ruleset_get(top_category, ())
             ):
                 parent_id = top_element.id
                 break
+            else:
+                stack.pop()
 
-            stack.pop()
-
-        element.metadata.parent_id = parent_id
+        metadata.parent_id = parent_id
         stack.append(element)
 
     return list(elements)

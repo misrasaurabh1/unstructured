@@ -78,13 +78,13 @@ def process_data_with_ocr(
     """
     data_bytes = data if isinstance(data, bytes) else data.read()
 
-    with tempfile.TemporaryDirectory() as tmp_dir_path:
-        tmp_file_path = os.path.join(tmp_dir_path, "tmp_file")
-        with open(tmp_file_path, "wb") as tmp_file:
-            tmp_file.write(data_bytes)
+    # Use tmp_file_path as a NamedTemporaryFile for better efficiency and automatic cleanup
+    with tempfile.NamedTemporaryFile(delete=True) as tmp_file:
+        tmp_file.write(data_bytes)
+        tmp_file.flush()
 
         merged_layouts = process_file_with_ocr(
-            filename=tmp_file_path,
+            filename=tmp_file.name,
             out_layout=out_layout,
             extracted_layout=extracted_layout,
             is_image=is_image,
@@ -153,10 +153,23 @@ def process_file_with_ocr(
         if is_image:
             with PILImage.open(filename) as images:
                 image_format = images.format
+                # Precompute extracted_regions up front for all pages if possible
+                extracted_regions_seq = (
+                    extracted_layout
+                    if len(extracted_layout) == getattr(images, "n_frames", 1)
+                    else None
+                )
+                # We use enumerate and ImageSequence.Iterator, but avoid repeated attribute lookups
                 for i, image in enumerate(ImageSequence.Iterator(images)):
                     image = image.convert("RGB")
                     image.format = image_format
-                    extracted_regions = extracted_layout[i] if i < len(extracted_layout) else None
+                    # Use precomputed extracted_regions if length matches, else fall back to original logic
+                    if extracted_regions_seq is not None:
+                        extracted_regions = extracted_regions_seq[i]
+                    else:
+                        extracted_regions = (
+                            extracted_layout[i] if i < len(extracted_layout) else None
+                        )
                     merged_page_layout = supplement_page_layout_with_ocr(
                         page_layout=out_layout.pages[i],
                         image=image,
@@ -180,8 +193,18 @@ def process_file_with_ocr(
                     userpw=password or "",
                 )
                 image_paths = cast(List[str], _image_paths)
+                # Precompute extracted_regions for all available pages if possible
+                num_pages = len(image_paths)
+                precomputed_extracted = (
+                    extracted_layout if len(extracted_layout) == num_pages else None
+                )
                 for i, image_path in enumerate(image_paths):
-                    extracted_regions = extracted_layout[i] if i < len(extracted_layout) else None
+                    if precomputed_extracted is not None:
+                        extracted_regions = precomputed_extracted[i]
+                    else:
+                        extracted_regions = (
+                            extracted_layout[i] if i < len(extracted_layout) else None
+                        )
                     with PILImage.open(image_path) as image:
                         merged_page_layout = supplement_page_layout_with_ocr(
                             page_layout=out_layout.pages[i],

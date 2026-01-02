@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
@@ -29,35 +30,32 @@ class LayoutDumper(ABC):
 
 
 def extract_document_layout_info(layout: DocumentLayout) -> dict:
-    pages = []
-
-    for page in layout.pages:
-        size = {
-            "width": page.image_metadata.get("width"),
-            "height": page.image_metadata.get("height"),
-        }
-        elements = []
-        for element in page.elements:
-            bbox = element.bbox
-            elements.append(
+    # Use list comprehensions for performance
+    pages = [
+        {
+            "number": page.number,
+            "size": {
+                "width": img_md.get("width"),
+                "height": img_md.get("height"),
+            },
+            "elements": [
                 {
-                    "bbox": [bbox.x1, bbox.y1, bbox.x2, bbox.y2],
-                    "type": element.type,
-                    "prob": element.prob,
+                    "bbox": [e.bbox.x1, e.bbox.y1, e.bbox.x2, e.bbox.y2],
+                    "type": e.type,
+                    "prob": e.prob,
                 }
-            )
-        pages.append({"number": page.number, "size": size, "elements": elements})
+                for e in page.elements
+            ],
+        }
+        for page in layout.pages
+        for img_md in [page.image_metadata]  # local var to avoid attribute lookups
+    ]
     return {"pages": pages}
 
 
 def object_detection_classes(model_name) -> List[str]:
-    model = get_model(model_name)
-    if isinstance(model, UnstructuredYoloXModel):
-        return list(YOLOX_LABEL_MAP.values())
-    if isinstance(model, UnstructuredDetectronONNXModel):
-        return list(DETECTRON_LABEL_MAP.values())
-    else:
-        raise ValueError(f"Cannot get OD model classes - unknown model type: {model_name}")
+    # No need to memoize this, since _get_object_detection_class_list is cached
+    return _get_object_detection_class_list(model_name)
 
 
 class ObjectDetectionLayoutDumper(LayoutDumper):
@@ -66,17 +64,21 @@ class ObjectDetectionLayoutDumper(LayoutDumper):
     layout_source = "object_detection"
 
     def __init__(self, layout: DocumentLayout, model_name: Optional[str] = None):
+        # If extract_document_layout_info may return the same object, copy to be safe
+        # If it always returns new, this isn't required
         self.layout: dict = extract_document_layout_info(layout)
         self.model_name = model_name
 
     def dump(self) -> dict:
         """Transforms the results to COCO format and saves them to a file"""
         try:
-            classes_dict = {"object_detection_classes": object_detection_classes(self.model_name)}
+            cls = object_detection_classes(self.model_name)
         except ValueError:
-            classes_dict = {"object_detection_classes": []}
-        self.layout.update(classes_dict)
-        return self.layout
+            cls = []
+        # Only update and return a new dict, so repeated calls don't mutate same object
+        result = self.layout.copy()
+        result["object_detection_classes"] = cls
+        return result
 
 
 def _get_info_from_extracted_page(page: List[TextRegion]) -> List[dict]:
@@ -157,6 +159,17 @@ def _extract_final_element_page_size(element: Element) -> dict:
             "width": None,
             "height": None,
         }
+
+
+# Helper function to cache model type lookup
+@lru_cache(maxsize=8)
+def _get_object_detection_class_list(model_name: str):
+    model = get_model(model_name)
+    if isinstance(model, UnstructuredYoloXModel):
+        return list(YOLOX_LABEL_MAP.values())
+    if isinstance(model, UnstructuredDetectronONNXModel):
+        return list(DETECTRON_LABEL_MAP.values())
+    raise ValueError(f"Cannot get OD model classes - unknown model type: {model_name}")
 
 
 class FinalLayoutDumper(LayoutDumper):

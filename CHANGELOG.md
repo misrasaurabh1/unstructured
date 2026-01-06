@@ -2,6 +2,8 @@
 
 ### Enhancements
 - Optimize `contains_verb` (codeflash)
+- Optimize `_PartitionerLoader._load_partitioner` (codeflash)
+
 ## 0.18.27-dev0
 
 ### Enhancement

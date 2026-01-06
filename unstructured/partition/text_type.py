@@ -217,13 +217,13 @@ def sentence_count(text: str, min_length: Optional[int] = None) -> int:
         The min number of words a section needs to be for it to be considered a sentence.
     """
     sentences = sent_tokenize(text)
-    count = 0
     if min_length:
+        count = 0
         trace_detail = trace_logger.detail  # type: ignore
         for sentence in sentences:
             stripped = remove_punctuation(sentence)
             # Fast token count after punctuation is removed: just split on whitespace
-            word_count = sum(1 for token in stripped.split() if token != ".")
+            word_count = len(stripped.split())
             if word_count < min_length:
                 trace_detail(
                     f"Sentence does not exceed {min_length} word tokens, it will not count toward "
@@ -232,10 +232,9 @@ def sentence_count(text: str, min_length: Optional[int] = None) -> int:
                 )
                 continue
             count += 1
+        return count
     else:
-        for sentence in sentences:
-            count += 1
-    return count
+        return len(sentences)
 
 
 def under_non_alpha_ratio(text: str, threshold: float = 0.5):

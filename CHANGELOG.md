@@ -1,13 +1,7 @@
-## 0.18.27-dev1
-
-### Enhancements
-- Optimize `contains_verb` (codeflash)
-- Optimize `_PartitionerLoader._load_partitioner` (codeflash)
-
-## 0.18.27-dev0
+## 0.18.27-dev6
 
 ### Enhancement
-- Optimize `sentence_count` (codeflash)
+- Optimize `clean_extra_whitespace_with_index_run` (codeflash)
 
 ## 0.18.26
 

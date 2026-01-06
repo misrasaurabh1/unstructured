@@ -1,9 +1,7 @@
-## 0.18.27-dev7
+## 0.18.27-dev3
 
-### Enhancement
-- Optimize `clean_extra_whitespace_with_index_run` (codeflash)
-- Optimize `get_bbox_thickness` (codeflash)
-
+### Fixes
+- Comment no-ops in `zoom_image` (codeflash)
 ## 0.18.26
 
 ### Fixes

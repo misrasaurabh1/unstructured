@@ -1,7 +1,8 @@
-## 0.18.27-dev6
+## 0.18.27-dev7
 
 ### Enhancement
 - Optimize `clean_extra_whitespace_with_index_run` (codeflash)
+- Optimize `get_bbox_thickness` (codeflash)
 
 ## 0.18.26
 

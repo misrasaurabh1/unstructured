@@ -18,6 +18,8 @@ from unstructured.partition.utils.constants import (
     TESSERACT_LANGUAGES_SPLITTER,
 )
 
+_warned_langs = set()
+
 _ASCII_RE = re.compile(r"^[\x00-\x7F]+$")
 
 # pytesseract.get_languages(config="") only shows user installed language packs,
@@ -369,7 +371,10 @@ def _get_iso639_language_object(lang: str) -> Optional[iso639.Language]:
     language = _cached_iso639_language_match(lang)
     if language is not None:
         return language
-    logger.warning(f"{lang} is not a valid standard language code.")
+    # Only log warning once per unique invalid language code
+    if lang not in _warned_langs:
+        logger.warning(f"{lang} is not a valid standard language code.")
+        _warned_langs.add(lang)
     return None
 
 

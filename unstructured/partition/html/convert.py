@@ -224,22 +224,34 @@ TYPE_TO_HTML_MAP = {
 
 
 def _group_element_children(children: list[ElementHtml]) -> list[ElementHtml]:
-    grouped_children: list[ElementHtml] = []
+    grouped_children: list["ElementHtml"] = []
     temp_group: list["ElementHtml"] = []
     prev_grouping = False
+
+    # Convert to set for O(1) lookup, safe because LIST_ELEMENTS is small and constant
+    _LIST_ELEMENTS_SET = set(LIST_ELEMENTS)
+
+    append_gc = grouped_children.append  # local variable for speed
+    append_tg = temp_group.append
+    olen_cls = OrderedListElementHtml  # local var
+
     for child in children:
-        grouping = child.element.category in LIST_ELEMENTS
+        # Save repeated attr lookup
+        cat = child.element.category
+        grouping = cat in _LIST_ELEMENTS_SET
         if grouping:
-            temp_group.append(child)
+            append_tg(child)
         elif prev_grouping:
-            grouped_children.append(OrderedListElementHtml(Element(), temp_group))
-            grouped_children.append(child)
+            # Only create OrderedListElementHtml if temp_group is not empty
+            append_gc(olen_cls(Element(), temp_group))
+            append_gc(child)
             temp_group = []
+            append_tg = temp_group.append  # update reference to new list's append
         else:
-            grouped_children.append(child)
+            append_gc(child)
         prev_grouping = grouping
     if temp_group:
-        grouped_children.append(OrderedListElementHtml(Element(), temp_group))
+        append_gc(olen_cls(Element(), temp_group))
     return grouped_children
 
 

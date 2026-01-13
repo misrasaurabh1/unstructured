@@ -20,6 +20,7 @@ from unstructured.nlp.patterns import (
     UNICODE_BULLETS_RE,
     UNICODE_BULLETS_RE_0W,
 )
+from itertools import islice
 
 
 def clean_non_ascii_chars(text) -> str:
@@ -199,15 +200,14 @@ def new_line_grouper(
 
     Will be returned as:
 
-    Iwan Roberts\n\nRoberts celebrating after scoring a goal for Norwich City\n\nin 2004
+    Iwan Roberts
+
+Roberts celebrating after scoring a goal for Norwich City
+
+in 2004
     """
-    paragraphs = paragraph_split.split(text)
-    clean_paragraphs = []
-    for paragraph in paragraphs:
-        if not paragraph.strip():
-            continue
-        clean_paragraphs.append(paragraph)
-    return "\n\n".join(clean_paragraphs)
+    # Use generator expression for better memory and speed
+    return "\n\n".join(paragraph for paragraph in paragraph_split.split(text) if paragraph.strip())
 
 
 def blank_line_grouper(
@@ -225,7 +225,11 @@ def blank_line_grouper(
 
     Will be returned as:
 
-    Vestibulum auctor dapibus neque.\n\nNunc dignissim risus id metus.\n\n
+    Vestibulum auctor dapibus neque.
+
+Nunc dignissim risus id metus.
+
+
 
     """
     return group_broken_paragraphs(text)
@@ -238,7 +242,8 @@ def auto_paragraph_grouper(
     threshold: float = 0.1,
 ) -> str:
     """
-    Checks the ratio of new line (\n) over the total max_line_count
+    Checks the ratio of new line (
+) over the total max_line_count
 
     If the ratio of new line is less than the threshold,
     the document is considered a new-line grouping type
@@ -248,14 +253,19 @@ def auto_paragraph_grouper(
     the document is considered a blank-line grouping type
     and passed on to blank_line_grouper function
     """
-    lines = line_split.split(text)
-    max_line_count = min(len(lines), max_line_count)
-    line_count, empty_line_count = 0, 0
-    for line in lines[:max_line_count]:
+    # Avoid splitting the entire text when only the count is needed
+    line_count = 0
+    empty_line_count = 0
+    for line in islice(text.splitlines(), max_line_count):
         line_count += 1
         if not line.strip():
             empty_line_count += 1
-    ratio = empty_line_count / line_count
+
+    # Prevent division by zero in case of empty text
+    if line_count == 0:
+        ratio = 0
+    else:
+        ratio = empty_line_count / line_count
 
     # NOTE(klaijan) - for ratio < threshold, we pass to new-line grouper,
     # otherwise to blank-line grouper

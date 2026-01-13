@@ -361,9 +361,28 @@ def spooled_to_bytes_io_if_needed(file: _T | SpooledTemporaryFile[bytes]) -> _T 
     `zipfile.Zipfile` raises on opening a `SpooledTemporaryFile` as does `Pandas.read_csv()`.
     """
     if isinstance(file, SpooledTemporaryFile):
-        file.seek(0)
-        return BytesIO(cast(bytes, file.read()))
+        # Use in-memory buffer directly if available (avoids unnecessary copy)
+        # CPython's SpooledTemporaryFile has a private _file attribute which is a BytesIO or a real file
+        # Use this optimization only if _rolled is False, i.e., still using BytesIO internal buffer
+        try:
+            if not getattr(file, "_rolled", True) and isinstance(
+                getattr(file, "_file", None), BytesIO
+            ):
+                buf: BytesIO = file._file  # type: ignore
+                buf.seek(0)
+                return buf
+        except Exception:
+            pass  # Fallback to default logic if attributes not present
 
+        # Fallback: reset position, make a new BytesIO from the file's bytes
+        current_pos = file.tell()
+        if current_pos != 0:
+            file.seek(0)
+        b = file.read()
+        # If read() did not return bytes, fallback to original behavior by casting
+        if not isinstance(b, bytes):
+            b = cast(bytes, b)
+        return BytesIO(b)
     # -- return `file` unchanged otherwise --
     return file
 

@@ -29,24 +29,26 @@ class LayoutDumper(ABC):
 
 
 def extract_document_layout_info(layout: DocumentLayout) -> dict:
-    pages = []
-
-    for page in layout.pages:
-        size = {
-            "width": page.image_metadata.get("width"),
-            "height": page.image_metadata.get("height"),
-        }
-        elements = []
-        for element in page.elements:
-            bbox = element.bbox
-            elements.append(
+    # Use list comprehensions for performance
+    pages = [
+        {
+            "number": page.number,
+            "size": {
+                "width": img_md.get("width"),
+                "height": img_md.get("height"),
+            },
+            "elements": [
                 {
-                    "bbox": [bbox.x1, bbox.y1, bbox.x2, bbox.y2],
-                    "type": element.type,
-                    "prob": element.prob,
+                    "bbox": [e.bbox.x1, e.bbox.y1, e.bbox.x2, e.bbox.y2],
+                    "type": e.type,
+                    "prob": e.prob,
                 }
-            )
-        pages.append({"number": page.number, "size": size, "elements": elements})
+                for e in page.elements
+            ],
+        }
+        for page in layout.pages
+        for img_md in [page.image_metadata]  # local var to avoid attribute lookups
+    ]
     return {"pages": pages}
 
 

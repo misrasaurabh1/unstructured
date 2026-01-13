@@ -77,11 +77,11 @@ def extract_mapi_id(text: str) -> List[str]:
 
 
 def extract_datetimetz(text: str) -> Optional[datetime.datetime]:
-    date_extractions = re.findall(EMAIL_DATETIMETZ_PATTERN, text)
-    if len(date_extractions) > 0:
-        return datetime.datetime.strptime(date_extractions[0], "%a, %d %b %Y %H:%M:%S %z")
-    else:
-        return None
+    match = re.search(EMAIL_DATETIMETZ_PATTERN, text)
+    if match:
+        # Only the first match is needed, no need to find all
+        return datetime.datetime.strptime(match.group(0), "%a, %d %b %Y %H:%M:%S %z")
+    return None
 
 
 def extract_us_phone_number(text: str):

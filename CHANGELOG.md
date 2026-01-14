@@ -93,6 +93,8 @@
 - Speed up function `check_for_nltk_package` by 111% (codeflash)
 - Speed up function `under_non_alpha_ratio` by 76% (codeflash)
 
+- Speed up function `under_non_alpha_ratio` by 76% (codeflash)
+
 ### Features
 
 ### Fixes
@@ -106,6 +108,7 @@
     - **pypdf**: GHSA-7hfw-26vp-jp8m
     - **transformers**: GHSA-9356-575x-2w9m
     - **urllib3**: GHSA-48p4-8xcf-vxj5
+
 
 ## 0.18.13
 

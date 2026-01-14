@@ -505,15 +505,16 @@ def create_file_type(
     alias_mime_types: Iterable[str] | None = None,
 ) -> FileType:
     """Register a new FileType member."""
+    # Use tuple() directly to avoid unnecessary intermediate lists and casts
     type_ = _create_file_type_enum(
         FileType,
         name,
         None,
-        importable_package_dependencies or cast(list[str], []),
+        tuple(importable_package_dependencies) if importable_package_dependencies else (),
         extra_name,
-        extensions or cast(list[str], []),
+        tuple(extensions) if extensions else (),
         canonical_mime_type,
-        alias_mime_types or cast(list[str], []),
+        tuple(alias_mime_types) if alias_mime_types else (),
         None,
     )
     type_._name_ = name

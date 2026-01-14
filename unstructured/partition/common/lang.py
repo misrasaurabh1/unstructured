@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Iterable, Iterator, Optional
 
 import iso639  # pyright: ignore[reportMissingTypeStubs]
@@ -212,16 +213,18 @@ def prepare_languages_for_tesseract(languages: Optional[list[str]] = ["eng"]) ->
     """
     if languages is None:
         raise ValueError("`languages` can not be `None`")
-    converted_languages = [
-        lang_code
-        for lang_code in (
-            _convert_language_code_to_pytesseract_lang_code(lang) for lang in languages
-        )
-        if lang_code
-    ]
-    # Remove duplicates from the list but keep the original order
-    converted_languages = list(dict.fromkeys(converted_languages))
-    if len(converted_languages) == 0:
+    # Remove duplicates from the list while keeping order
+    seen = set()
+    converted_languages = []
+    for lang in languages:
+        code = _convert_language_code_to_pytesseract_lang_code(lang)
+        if code:
+            # Split codes for join on + (could be multiple codes joined by +)
+            for part in code.split(TESSERACT_LANGUAGES_SPLITTER):
+                if part not in seen:
+                    seen.add(part)
+                    converted_languages.append(part)
+    if not converted_languages:
         logger.warning(
             "Failed to find any valid standard language code from "
             f"languages: {languages}, proceed with `eng` instead.",
@@ -327,37 +330,36 @@ def _convert_language_code_to_pytesseract_lang_code(lang: str) -> str:
     Convert a single language code to its tesseract formatted and recognized
     langcode(s), if supported.
     """
-    # if language is already tesseract langcode, return it immediately
-    # this will catch the tesseract special cases equ and osd
-    # NOTE(shreya): this may catch some cases of choosing between tesseract code variants for a lang
-    if lang in PYTESSERACT_LANG_CODES:
+    # Fast path: already a pytesseract lang code
+    if lang in _PYTESSERACT_LANG_CODES_SET:
         return lang
 
-    lang_iso639 = _get_iso639_language_object(lang)
+    lang_iso639 = _get_iso639_language_object_cached(lang)
 
     # tesseract uses 3 digit codes (639-3, 639-2b, etc) as prefixes, with suffixes for orthography
-    # use first 3 letters of tesseract codes for matching to standard codes
-    pytesseract_langs_3 = {lang[:3] for lang in PYTESSERACT_LANG_CODES}
+    # The set of prefixes is already precomputed in _PYTESSERACT_LANGS_3_SET
 
     if lang_iso639:
-        # try to match ISO 639-3 code
-        if lang_iso639.part3 in pytesseract_langs_3:
-            matched_langcodes = _get_all_tesseract_langcodes_with_prefix(lang_iso639.part3)
+        # Try to match ISO 639-3 code
+        part3 = lang_iso639.part3
+        if part3 in _PYTESSERACT_LANGS_3_SET:
+            matched_langcodes = _get_all_tesseract_langcodes_with_prefix_cached(part3)
             return TESSERACT_LANGUAGES_SPLITTER.join(matched_langcodes)
 
-        # try to match ISO 639-2b
-        elif lang_iso639.part2b in pytesseract_langs_3:
-            matched_langcodes = _get_all_tesseract_langcodes_with_prefix(lang_iso639.part2b)
+        # Try to match ISO 639-2b
+        part2b = lang_iso639.part2b
+        if part2b in _PYTESSERACT_LANGS_3_SET:
+            matched_langcodes = _get_all_tesseract_langcodes_with_prefix_cached(part2b)
             return TESSERACT_LANGUAGES_SPLITTER.join(matched_langcodes)
 
-        # try to match ISO 639-2t
-        elif lang_iso639.part2t in pytesseract_langs_3:
-            matched_langcodes = _get_all_tesseract_langcodes_with_prefix(lang_iso639.part2t)
+        # Try to match ISO 639-2t
+        part2t = lang_iso639.part2t
+        if part2t in _PYTESSERACT_LANGS_3_SET:
+            matched_langcodes = _get_all_tesseract_langcodes_with_prefix_cached(part2t)
             return TESSERACT_LANGUAGES_SPLITTER.join(matched_langcodes)
 
-        else:
-            logger.warning(f"{lang} is not a language supported by Tesseract.")
-            return ""
+        logger.warning(f"{lang} is not a language supported by Tesseract.")
+        return ""
     logger.warning(f"{lang} is not a language supported by Tesseract.")
     return ""
 
@@ -522,3 +524,18 @@ def _clean_ocr_languages_arg(ocr_languages: list[str] | str) -> str:
     ocr_languages = re.sub(r"[\[\]]", "", ocr_languages)
 
     return ocr_languages
+
+
+@lru_cache(maxsize=128)
+def _get_iso639_language_object_cached(lang: str):
+    return _get_iso639_language_object(lang)
+
+
+@lru_cache(maxsize=128)
+def _get_all_tesseract_langcodes_with_prefix_cached(prefix: str):
+    return tuple(_get_all_tesseract_langcodes_with_prefix(prefix))
+
+
+_PYTESSERACT_LANGS_3_SET = {lang[:3] for lang in PYTESSERACT_LANG_CODES}
+
+_PYTESSERACT_LANG_CODES_SET = set(PYTESSERACT_LANG_CODES)

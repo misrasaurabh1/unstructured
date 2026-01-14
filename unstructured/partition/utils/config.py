@@ -46,8 +46,10 @@ class ENVConfig:
         return default_value
 
     def _get_bool(self, var: str, default_value: bool) -> bool:
-        if value := self._get_string(var):
-            return value.lower() in ("true", "1", "t")
+        value = os.environ.get(var)
+        if value:
+            value_lower = value.lower()
+            return value_lower in ("true", "1", "t")
         return default_value
 
     def _setup_tmpdir(self, tmpdir: str) -> None:

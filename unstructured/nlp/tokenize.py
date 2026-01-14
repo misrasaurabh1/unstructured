@@ -52,7 +52,7 @@ def sent_tokenize(text: str) -> List[str]:
     """A wrapper so that we can cache the result of NLTKs _sent_tokenize as an
     immutable, while returning the expected return type (list)."""
     # Return as List[str] to preserve external interface and avoid unnecessary list copying
-    return list(_tokenize_for_cache(text))
+    return _list_tokenize_for_cache(text)
 
 
 @lru_cache(maxsize=CACHE_MAX_SIZE)
@@ -78,3 +78,9 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
 def _tokenize_for_cache(text: str) -> Tuple[str, ...]:
     """A wrapper around the NLTK sentence tokenizer with LRU caching enabled."""
     return tuple(_sent_tokenize(text))
+
+
+@lru_cache(maxsize=CACHE_MAX_SIZE)
+def _list_tokenize_for_cache(text: str) -> List[str]:
+    """Caches the list variant to avoid repeated tuple->list copying"""
+    return list(_tokenize_for_cache(text))

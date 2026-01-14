@@ -87,11 +87,12 @@ def _get_bbox_to_page_ratio(bbox: tuple[int, int, int, int], page_size: tuple[in
     """
     x1, y1, x2, y2 = bbox
     page_width, page_height = page_size
-    page_diagonal = math.sqrt(page_height**2 + page_width**2)
+    # Compute squared diagonals and take sqrt of ratio to avoid two sqrt calls
+    page_diagonal_sq = page_height**2 + page_width**2
     bbox_width = x2 - x1
     bbox_height = y2 - y1
-    bbox_diagonal = math.sqrt(bbox_height**2 + bbox_width**2)
-    return bbox_diagonal / page_diagonal
+    bbox_diagonal_sq = bbox_height**2 + bbox_width**2
+    return math.sqrt(bbox_diagonal_sq / page_diagonal_sq)
 
 
 def _get_optimal_value_for_bbox(
@@ -120,7 +121,12 @@ def _get_optimal_value_for_bbox(
     # Direct linear interpolation instead of np.polyfit for better performance
     slope = (max_value - min_value) / (ratio_for_max_value - ratio_for_min_value)
     value = int(min_value + slope * (bbox_to_page_ratio - ratio_for_min_value))
-    return max(min_value, min(max_value, value))
+    # Clamp value between min_value and max_value
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
 
 
 def get_bbox_text_size(

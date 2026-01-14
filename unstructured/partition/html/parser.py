@@ -143,7 +143,7 @@ def _normalize_text(text: str) -> str:
 
     Produces the empty string when `text` contains only whitespace.
     """
-    return " ".join(text.strip().split())
+    return " ".join(text.split())
 
 
 class TextSegment(NamedTuple):
